@@ -111,7 +111,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
   const [groupByFamily, setGroupByFamily] = useState<boolean>(false)
   const [searchName, setSearchName] = useState<string>("")
   const [filterCategory, setFilterCategory] = useState<
-    "all" | "without_discipler" | "children" | "adults"
+    "all" | "without_discipler" | "children" | "adults" | "core"
   >("all")
 
   // Reseta o filtro de família quando o grupo caseiro selecionado mudar
@@ -507,6 +507,8 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         if (!isChild) return false
       } else if (filterCategory === "adults") {
         if (isChild) return false
+      } else if (filterCategory === "core") {
+        if (!p.is_home_group_core) return false
       }
 
       // 4. Filtro por Família no Grupo
@@ -555,8 +557,9 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     const adults = activeScopeProfiles.filter((p) => !checkIsChild(p)).length
     const totalFamilies = groupFamilies.filter((f) => !f.isIndividual).length
     const totalSingles = groupFamilies.filter((f) => f.isIndividual).length
+    const coreCount = activeScopeProfiles.filter((p) => p.is_home_group_core).length
 
-    return { total, withDiscipler, withoutDiscipler, children, adults, totalFamilies, totalSingles }
+    return { total, withDiscipler, withoutDiscipler, children, adults, totalFamilies, totalSingles, coreCount }
   }, [activeScopeProfiles, groupFamilies, presbyterIds])
 
   // Opções para o seletor com pesquisa de Grupo Caseiro
@@ -973,7 +976,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                           </Badge>
                         )}
                         <span className="text-xs font-medium text-muted-foreground">
-                          • {counts.total} irmão(s) vinculados • {counts.totalFamilies} famílias{counts.totalSingles > 0 ? ` • ${counts.totalSingles} solteiro(s)` : ""}
+                          • {counts.total} irmão(s) vinculados{counts.coreCount > 0 ? ` • ${counts.coreCount} no núcleo` : ""} • {counts.totalFamilies} famílias{counts.totalSingles > 0 ? ` • ${counts.totalSingles} solteiro(s)` : ""}
                         </span>
                       </div>
 
@@ -1006,8 +1009,8 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                     </Button>
                   </div>
 
-                  {/* 2 mini cards rápidos do grupo */}
-                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/50">
+                  {/* 2 ou 3 mini cards rápidos do grupo */}
+                  <div className={`grid gap-2 pt-1 border-t border-border/50 ${counts.coreCount > 0 ? "grid-cols-3" : "grid-cols-2"}`}>
                     <button
                       type="button"
                       onClick={() => setFilterCategory("all")}
@@ -1020,6 +1023,21 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                       <div className="text-lg font-bold text-foreground">{counts.total}</div>
                       <div className="text-[11px]">Irmãos no Grupo</div>
                     </button>
+
+                    {counts.coreCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCategory("core")}
+                        className={`rounded-xl p-2.5 text-center border transition-all cursor-pointer ${
+                          filterCategory === "core"
+                            ? "border-blue-500 bg-blue-500/15 text-blue-800 dark:text-blue-300 font-semibold"
+                            : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                        }`}
+                      >
+                        <div className="text-lg font-bold text-blue-700 dark:text-blue-400">{counts.coreCount}</div>
+                        <div className="text-[11px]">Núcleo do GC</div>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -1209,6 +1227,21 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                   >
                     Adultos ({counts.adults})
                   </button>
+
+                  {counts.coreCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFilterCategory("core")}
+                      className={`min-h-[44px] shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer ${
+                        filterCategory === "core"
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "border border-blue-500/30 bg-blue-500/10 text-blue-800 dark:text-blue-300 hover:bg-blue-500/20"
+                      }`}
+                    >
+                      <Users className="h-3.5 w-3.5" />
+                      <span>Núcleo ({counts.coreCount})</span>
+                    </button>
+                  )}
                 </div>
               </div>
 

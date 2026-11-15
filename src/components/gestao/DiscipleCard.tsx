@@ -1,4 +1,4 @@
-import { Phone, Edit, MessageSquare, Shield, Baby, BookOpen, UserCheck, MapPin, AlertCircle, HeartHandshake } from "lucide-react"
+import { Phone, Edit, MessageSquare, Shield, Baby, BookOpen, UserCheck, MapPin, AlertCircle, HeartHandshake, Users } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -102,6 +102,15 @@ export function DiscipleCard({
                 >
                   <Shield className="mr-1 h-3 w-3" />
                   Líder de GC
+                </Badge>
+              )}
+              {!isLeader && disciple.is_home_group_core && (
+                <Badge
+                  variant="outline"
+                  className={`${THEME_CLASSES.badgeInfo} text-[11px] font-medium`}
+                >
+                  <Users className="mr-1 h-3 w-3" />
+                  Núcleo do GC
                 </Badge>
               )}
               {disciple.is_presbyter && (

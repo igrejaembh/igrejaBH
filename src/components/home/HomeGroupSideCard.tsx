@@ -4,6 +4,7 @@ import { Home, MapPin, Calendar, Clock, ArrowRight, MessageCircle, Phone, Users 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { THEME_CLASSES } from "@/constants/colors"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Dialog,
@@ -23,7 +24,9 @@ type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"] & {
 type GroupMember = Pick<
   Database["public"]["Tables"]["profiles"]["Row"],
   "id" | "full_name" | "avatar_url" | "phone"
->
+> & {
+  is_home_group_core?: boolean | null
+}
 
 interface HomeGroupSideCardProps {
   homeGroup: HomeGroup | null
@@ -196,6 +199,27 @@ export function HomeGroupSideCard({
             </div>
           )}
 
+          {/* Núcleo do Grupo Caseiro */}
+          {(() => {
+            const coreMembers = members.filter(
+              (m) =>
+                m.is_home_group_core &&
+                m.id !== homeGroup.leader_1_id &&
+                m.id !== homeGroup.leader_2_id
+            )
+            if (coreMembers.length === 0) return null
+            return (
+              <div className="space-y-1 border-t border-border/30 pt-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Núcleo do Grupo
+                </span>
+                <p className="text-xs text-foreground/90 font-medium">
+                  {coreMembers.map((c) => c.full_name).join(", ")}
+                </p>
+              </div>
+            )
+          })()}
+
           {/* Irmãos do Grupo (Resumo Rápido) */}
           <div className="space-y-1.5 border-t border-border/30 pt-2">
             <div className="flex items-center justify-between text-[11px]">
@@ -290,9 +314,21 @@ export function HomeGroupSideCard({
                           .join("")}
                       </AvatarFallback>
                     </Avatar>
-                    <span className="truncate text-xs font-semibold text-foreground">
-                      {member.full_name}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      <span className="truncate text-xs font-semibold text-foreground">
+                        {member.full_name}
+                      </span>
+                      {(member.id === homeGroup.leader_1_id || member.id === homeGroup.leader_2_id) && (
+                        <Badge variant="outline" className={`${THEME_CLASSES.badgeSuccess} text-[9px] px-1.5 py-0`}>
+                          Líder
+                        </Badge>
+                      )}
+                      {member.is_home_group_core && member.id !== homeGroup.leader_1_id && member.id !== homeGroup.leader_2_id && (
+                        <Badge variant="outline" className={`${THEME_CLASSES.badgeInfo} text-[9px] px-1.5 py-0`}>
+                          Núcleo
+                        </Badge>
+                      )}
+                    </div>
                   </div>
 
                   {cleanPhone && (

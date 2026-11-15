@@ -908,6 +908,11 @@ export default function MemberManagement({ hideHeader = false }: MemberManagemen
                                                 Líder GC
                                             </span>
                                         )}
+                                        {!member.is_leader && member.is_home_group_core && (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-blue-500/10 text-blue-600 border border-blue-500/20">
+                                                Núcleo GC
+                                            </span>
+                                        )}
                                         {!member.is_baptized && !member.baptism_date && (member.father_id || member.mother_id) && !member.discipler_id && !member.spouse_id && (
                                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">
                                                 Filho Não Batizado

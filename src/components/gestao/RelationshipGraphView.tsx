@@ -81,6 +81,7 @@ interface GraphNode {
   isPresbyterSpouse: boolean
   isDeacon: boolean
   isLeader: boolean
+  isHomeGroupCore: boolean
   isChild: boolean
   directDisciplesCount: number
   totalLineageCount: number
@@ -2008,7 +2009,8 @@ function RelationshipGraphCanvas({
         <div className="pointer-events-none absolute top-14 left-3 z-10 max-w-xs rounded-xl border border-border bg-popover/95 p-3 text-xs text-popover-foreground shadow-lg backdrop-blur-xs">
           <div className="font-semibold text-foreground">{hoveredNode.name}</div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
-            {RELATIONSHIP_NODE_COLORS[hoveredNode.role].label} •{" "}
+            {RELATIONSHIP_NODE_COLORS[hoveredNode.role].label}
+            {hoveredNode.isHomeGroupCore && hoveredNode.role !== "leader" ? " (Núcleo)" : ""} •{" "}
             {hoveredNode.homeGroupName || "Sem Grupo Caseiro"}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5 text-[10px]">
@@ -2264,6 +2266,7 @@ export function RelationshipGraphView({
         isPresbyterSpouse,
         isDeacon,
         isLeader,
+        isHomeGroupCore: !!p.is_home_group_core,
         isChild,
         directDisciplesCount,
         totalLineageCount,
@@ -3002,6 +3005,11 @@ export function RelationshipGraphView({
                     <Badge variant="outline" className="text-[11px]">
                       {RELATIONSHIP_NODE_COLORS[selectedNodeData.node.role].label}
                     </Badge>
+                    {selectedNodeData.node.isHomeGroupCore && selectedNodeData.node.role !== "leader" && (
+                      <Badge variant="outline" className={`${THEME_CLASSES.badgeInfo} text-[11px]`}>
+                        Núcleo do GC
+                      </Badge>
+                    )}
                     <span className="text-xs text-muted-foreground truncate">
                       {selectedNodeData.node.homeGroupName || "Sem Grupo Caseiro"}
                     </span>

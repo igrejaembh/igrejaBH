@@ -447,6 +447,7 @@ export type Database = {
           is_church_linked: boolean
           is_deacon: boolean | null
           is_dev: boolean | null
+          is_home_group_core: boolean
           is_presbyter: boolean | null
           marital_status: string | null
           mother_id: string | null
@@ -487,6 +488,7 @@ export type Database = {
           is_church_linked?: boolean
           is_deacon?: boolean | null
           is_dev?: boolean | null
+          is_home_group_core?: boolean
           is_presbyter?: boolean | null
           marital_status?: string | null
           mother_id?: string | null
@@ -527,6 +529,7 @@ export type Database = {
           is_church_linked?: boolean
           is_deacon?: boolean | null
           is_dev?: boolean | null
+          is_home_group_core?: boolean
           is_presbyter?: boolean | null
           marital_status?: string | null
           mother_id?: string | null

@@ -4,6 +4,7 @@ import { Home, Users, MapPin, Calendar, Clock, ArrowRight, MessageCircle, Phone,
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { THEME_CLASSES } from "@/constants/colors"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Dialog,
@@ -23,7 +24,9 @@ type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"] & {
 type GroupMember = Pick<
   Database["public"]["Tables"]["profiles"]["Row"],
   "id" | "full_name" | "avatar_url" | "phone"
->
+> & {
+  is_home_group_core?: boolean | null
+}
 
 interface HomeGroupCardProps {
   homeGroup: HomeGroup | null
@@ -208,6 +211,23 @@ export function HomeGroupCard({
             </div>
           )}
 
+          {/* Núcleo do Grupo Caseiro */}
+          {(() => {
+            const coreMembers = members.filter(
+              (m) =>
+                m.is_home_group_core &&
+                m.id !== homeGroup.leader_1_id &&
+                m.id !== homeGroup.leader_2_id
+            )
+            if (coreMembers.length === 0) return null
+            return (
+              <div className="text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">Núcleo do grupo: </span>
+                {coreMembers.map((c) => c.full_name).join(", ")}
+              </div>
+            )
+          })()}
+
           {/* Avatares dos Irmãos do Grupo */}
           <div className="space-y-1.5 pt-1">
             <div className="flex items-center justify-between text-xs">
@@ -296,9 +316,21 @@ export function HomeGroupCard({
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="text-sm font-semibold text-foreground leading-tight">
-                      {m.full_name}
-                    </p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm font-semibold text-foreground leading-tight">
+                        {m.full_name}
+                      </p>
+                      {(m.id === homeGroup.leader_1_id || m.id === homeGroup.leader_2_id) && (
+                        <Badge variant="outline" className={`${THEME_CLASSES.badgeSuccess} text-[9px] px-1.5 py-0`}>
+                          Líder
+                        </Badge>
+                      )}
+                      {m.is_home_group_core && m.id !== homeGroup.leader_1_id && m.id !== homeGroup.leader_2_id && (
+                        <Badge variant="outline" className={`${THEME_CLASSES.badgeInfo} text-[9px] px-1.5 py-0`}>
+                          Núcleo
+                        </Badge>
+                      )}
+                    </div>
                     {m.phone && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                         <Phone className="h-3 w-3 text-primary/70" />

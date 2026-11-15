@@ -261,6 +261,21 @@ export function GroupsDirectoryAndMap({
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       Líderes: <strong className="text-foreground/90">{getLeadersText(hg)}</strong>
                     </p>
+                    {(() => {
+                      const coreMembers = allProfiles.filter(
+                        (p) =>
+                          p.home_group_id === hg.id &&
+                          p.is_home_group_core &&
+                          p.id !== hg.leader_1_id &&
+                          p.id !== hg.leader_2_id
+                      )
+                      if (coreMembers.length === 0) return null
+                      return (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          Núcleo: <span className="text-foreground/80 font-medium">{coreMembers.map((c) => c.full_name).join(", ")}</span>
+                        </p>
+                      )
+                    })()}
                   </div>
 
                   {/* Horário e Endereço */}

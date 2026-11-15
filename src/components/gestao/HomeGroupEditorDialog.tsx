@@ -10,6 +10,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Badge } from "@/components/ui/badge"
+import { THEME_CLASSES } from "@/constants/colors"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { MapPin, Clock, Calendar, Users, Loader2, Search } from "lucide-react"
 import { toast } from "sonner"
@@ -59,6 +62,7 @@ export function HomeGroupEditorDialog({
   const [leader1Id, setLeader1Id] = useState<string>("")
   const [leader2Id, setLeader2Id] = useState<string>("none")
   const [sectorId, setSectorId] = useState<string>("none")
+  const [coreMemberIds, setCoreMemberIds] = useState<Set<string>>(new Set())
 
   const [geocoding, setGeocoding] = useState<boolean>(false)
   const [saving, setSaving] = useState<boolean>(false)
@@ -74,6 +78,13 @@ export function HomeGroupEditorDialog({
         setLeader1Id(homeGroup.leader_1_id || "")
         setLeader2Id(homeGroup.leader_2_id || "none")
         setSectorId(homeGroup.sector_id || "none")
+
+        const existingCore = new Set(
+          allProfiles
+            .filter((p) => p.home_group_id === homeGroup.id && p.is_home_group_core)
+            .map((p) => p.id)
+        )
+        setCoreMemberIds(existingCore)
       } else {
         setMeetingDay(3)
         setStartTime("20:00")
@@ -83,9 +94,10 @@ export function HomeGroupEditorDialog({
         setLeader1Id("")
         setLeader2Id("none")
         setSectorId("none")
+        setCoreMemberIds(new Set())
       }
     }
-  }, [open, homeGroup])
+  }, [open, homeGroup, allProfiles])
 
   const leader1Options = useMemo(() => {
     return allProfiles
@@ -130,6 +142,31 @@ export function HomeGroupEditorDialog({
       label: d.label,
     }))
   }, [])
+
+  const groupEligibleMembers = useMemo(() => {
+    if (!homeGroup) return []
+    return allProfiles
+      .filter(
+        (p) =>
+          p.home_group_id === homeGroup.id &&
+          p.id !== leader1Id &&
+          p.id !== (leader2Id !== "none" ? leader2Id : null) &&
+          (!p.father_id || p.is_baptized || !!p.baptism_date)
+      )
+      .sort((a, b) => a.full_name.localeCompare(b.full_name))
+  }, [allProfiles, homeGroup, leader1Id, leader2Id])
+
+  const toggleCoreMember = (profileId: string) => {
+    setCoreMemberIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(profileId)) {
+        next.delete(profileId)
+      } else {
+        next.add(profileId)
+      }
+      return next
+    })
+  }
 
   const handleGeocodeAddress = async () => {
     if (!locationText.trim()) {
@@ -283,6 +320,44 @@ export function HomeGroupEditorDialog({
           .eq("id", homeGroup.id)
 
         if (error) throw error
+
+        // Sincronizar membros do núcleo do grupo caseiro
+        const groupId = homeGroup.id
+        const toSetCore = allProfiles.filter(
+          (p) =>
+            p.home_group_id === groupId &&
+            coreMemberIds.has(p.id) &&
+            !p.is_home_group_core
+        )
+        const toUnsetCore = allProfiles.filter(
+          (p) =>
+            p.home_group_id === groupId &&
+            !coreMemberIds.has(p.id) &&
+            p.is_home_group_core
+        )
+
+        if (toSetCore.length > 0) {
+          const { error: setErr } = await supabase
+            .from("profiles")
+            .update({ is_home_group_core: true })
+            .in(
+              "id",
+              toSetCore.map((p) => p.id)
+            )
+          if (setErr) console.error("Erro ao atualizar membros do núcleo:", setErr)
+        }
+
+        if (toUnsetCore.length > 0) {
+          const { error: unsetErr } = await supabase
+            .from("profiles")
+            .update({ is_home_group_core: false })
+            .in(
+              "id",
+              toUnsetCore.map((p) => p.id)
+            )
+          if (unsetErr) console.error("Erro ao remover membros do núcleo:", unsetErr)
+        }
+
         toast.success("Informações do Grupo Caseiro atualizadas com sucesso!")
       } else {
         const { error } = await supabase.from("home_groups").insert(payload)
@@ -366,6 +441,66 @@ export function HomeGroupEditorDialog({
                   />
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Núcleo do Grupo Caseiro */}
+          {homeGroup && (
+            <div className="space-y-4 rounded-xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs">
+              <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-primary" />
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                    Núcleo do Grupo Caseiro
+                  </h4>
+                </div>
+                <Badge variant="outline" className={`${THEME_CLASSES.badgeInfo} text-[10px]`}>
+                  {coreMemberIds.size} no núcleo
+                </Badge>
+              </div>
+
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Irmãos que fazem parte do núcleo da liderança do grupo caseiro. Esta marcação identifica o núcleo de apoio fraterno e não concede permissões administrativas.
+              </p>
+
+              {groupEligibleMembers.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border/80 p-4 text-center text-xs text-muted-foreground">
+                  Nenhum outro irmão vinculado a este grupo caseiro no momento. Vincule discípulos através do cadastro de irmãos.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 max-h-56 overflow-y-auto pr-1">
+                  {groupEligibleMembers.map((member) => {
+                    const isSelected = coreMemberIds.has(member.id)
+                    return (
+                      <div
+                        key={member.id}
+                        onClick={() => toggleCoreMember(member.id)}
+                        className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer min-h-[44px] select-none ${
+                          isSelected
+                            ? "border-primary/50 bg-primary/5"
+                            : "border-border/70 bg-card hover:bg-muted/30"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleCoreMember(member.id)}
+                            className="h-4 w-4 rounded"
+                          />
+                          <span className="text-xs font-medium text-foreground truncate">
+                            {member.full_name}
+                          </span>
+                        </div>
+                        {isSelected && (
+                          <Badge variant="outline" className={`${THEME_CLASSES.badgeInfo} text-[9px] shrink-0`}>
+                            Núcleo
+                          </Badge>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 

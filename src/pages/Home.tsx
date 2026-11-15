@@ -115,7 +115,7 @@ export default function Home() {
 
           const { data: membersData } = await supabase
             .from("profiles")
-            .select("id, full_name, avatar_url, phone")
+            .select("id, full_name, avatar_url, phone, is_home_group_core")
             .eq("home_group_id", userProfile.home_group_id)
             .order("full_name")
 
@@ -128,7 +128,7 @@ export default function Home() {
         if (userProfile.discipler_id) {
           const { data: disciplerData } = await supabase
             .from("profiles")
-            .select("id, full_name, avatar_url, phone")
+            .select("id, full_name, avatar_url, phone, is_home_group_core")
             .eq("id", userProfile.discipler_id)
             .maybeSingle()
 
@@ -149,7 +149,7 @@ export default function Home() {
         // Discípulos que eu acompanho
         const { data: disciplesData } = await supabase
           .from("profiles")
-          .select("id, full_name, avatar_url, phone")
+          .select("id, full_name, avatar_url, phone, is_home_group_core")
           .eq("discipler_id", userProfile.id)
 
         if (isMounted && disciplesData) {

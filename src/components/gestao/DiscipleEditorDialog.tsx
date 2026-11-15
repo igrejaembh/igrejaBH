@@ -19,6 +19,7 @@ import {
 } from "@/lib/homeGroupUtils"
 import {
   User,
+  Users,
   Baby,
   Phone,
   ChevronDown,
@@ -112,6 +113,7 @@ export function DiscipleEditorDialog({
   const [phone, setPhone] = useState<string>("")
   const [gender, setGender] = useState<"M" | "F">("M")
   const [homeGroupId, setHomeGroupId] = useState<string>("")
+  const [isHomeGroupCore, setIsHomeGroupCore] = useState<boolean>(false)
   const [disciplerId, setDisciplerId] = useState<string>("none")
   const [customDisciplerName, setCustomDisciplerName] = useState<string>("")
   const [spouseId, setSpouseId] = useState<string>("none")
@@ -148,6 +150,7 @@ export function DiscipleEditorDialog({
         setPhone(disciple.phone ? formatPhone(disciple.phone) : "")
         setGender(normalizeGender(disciple.gender))
         setHomeGroupId(disciple.home_group_id || defaultHomeGroupId || "")
+        setIsHomeGroupCore(Boolean(disciple.is_home_group_core))
         setDisciplerId(disciple.discipler_id || "none")
         setCustomDisciplerName(disciple.custom_discipler_name || "")
         setSpouseId(disciple.spouse_id || "none")
@@ -185,6 +188,7 @@ export function DiscipleEditorDialog({
         setPhone("")
         setGender("M")
         setHomeGroupId(defaultHomeGroupId || (homeGroups[0]?.id ?? ""))
+        setIsHomeGroupCore(false)
         setDisciplerId("none")
         setSpouseId("none")
         setFatherId("none")
@@ -465,6 +469,7 @@ export function DiscipleEditorDialog({
         phone: cleanPhone,
         gender: gender,
         home_group_id: homeGroupId,
+        is_home_group_core: !isChild && Boolean(homeGroupId) ? isHomeGroupCore : false,
         discipler_id: isRegisteredDiscipler ? disciplerId : null,
         custom_discipler_name: finalCustomDiscipler,
         spouse_id: !isChild && spouseId !== "none" ? spouseId : null,
@@ -829,6 +834,30 @@ export function DiscipleEditorDialog({
                   clearable={false}
                 />
               </div>
+
+              {/* Marcação de Núcleo do Grupo Caseiro */}
+              {!isChild && Boolean(homeGroupId) && (
+                <div className="sm:col-span-2 rounded-xl border border-border/70 bg-muted/20 p-3 space-y-1.5">
+                  <div className="flex items-center gap-2.5 min-h-[44px]">
+                    <Checkbox
+                      id="isHomeGroupCore"
+                      checked={isHomeGroupCore}
+                      onCheckedChange={(checked) => setIsHomeGroupCore(!!checked)}
+                      className="h-5 w-5 rounded-md"
+                    />
+                    <Label
+                      htmlFor="isHomeGroupCore"
+                      className="text-xs font-semibold text-foreground cursor-pointer flex items-center gap-1.5 select-none"
+                    >
+                      <Users className="h-3.5 w-3.5 text-primary" />
+                      Parte do Núcleo do Grupo Caseiro
+                    </Label>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed pl-7">
+                    Identifica este irmão como parte do núcleo de apoio e liderança do grupo caseiro. Não concede permissões administrativas.
+                  </p>
+                </div>
+              )}
 
               {/* WhatsApp / Telefone */}
               <div className="space-y-1.5 sm:col-span-2">
