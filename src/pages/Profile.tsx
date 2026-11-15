@@ -15,6 +15,11 @@ import {
   CameraIcon,
   Loader2Icon,
   SearchIcon,
+  ArrowLeftIcon,
+  InfoIcon,
+  AlertCircleIcon,
+  ArrowRightIcon,
+  type LucideIcon,
 } from "lucide-react"
 import supabase from "@/lib/supabase"
 import { ImageCropper } from "@/components/ImageCropper"
@@ -36,8 +41,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldLabel } from "@/components/ui/field"
 import {
   Combobox,
   ComboboxContent,
@@ -46,16 +50,44 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@/components/ui/combobox"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { toast } from "sonner"
-import { format } from "date-fns"
+import { format, differenceInYears } from "date-fns"
 import { ptBR } from "date-fns/locale"
+import {
+  useCurrentUserProfile,
+  invalidateCurrentUserProfileCache,
+} from "@/hooks/useCurrentUserProfile"
+import { formatCPF } from "@/lib/cpfUtils"
+import {
+  formatDisplayGender,
+  formatDisplayMaritalStatus,
+} from "@/lib/profileNormalization"
+import {
+  getMissingProfileFields,
+  isSectionComplete,
+  type ProfileSectionKey,
+} from "@/lib/profile-config"
+import { CompleteProfileDialog } from "@/components/profile/CompleteProfileDialog"
 import { cn } from "@/lib/utils"
+
+export interface ChildProfile {
+  id: string
+  full_name: string
+  avatar_url?: string | null
+  birth_date?: string | null
+  baptism_date?: string | null
+  is_baptized?: boolean
+  gender?: string | null
+  user_id?: string | null
+  phone?: string | null
+}
 
 interface UserProfile {
   id: string
+  user_id?: string | null
   full_name: string
   email: string
+  is_church_linked: boolean
   is_dev: boolean
   is_presbyter: boolean
   is_deacon: boolean
@@ -72,14 +104,16 @@ interface UserProfile {
   address_city?: string
   address_state?: string
   address_zip_code?: string
+  is_baptized?: boolean
   baptism_date?: string
   home_group_id?: string
   discipler_id?: string
-  spouse_id?: string
-  father_id?: string
-  mother_id?: string
+  spouse_id?: string | null
+  father_id?: string | null
+  mother_id?: string | null
   home_group_name?: string
   discipler_name?: string
+  is_custom_discipler?: boolean
   spouse_name?: string
   father_name?: string
   mother_name?: string
@@ -90,6 +124,7 @@ interface UserProfile {
   dependents_count?: number | null
   housing_status?: string | null
   drivers_license?: string | null
+  children?: ChildProfile[]
 }
 
 interface MemberOption {
@@ -100,23 +135,28 @@ interface MemberOption {
 export default function Profile() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const { isManagement } = useCurrentUserProfile()
   const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [isOwnProfile, setIsOwnProfile] = useState(true)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [isEditingContact, setIsEditingContact] = useState(false)
-  const [isEditingAddress, setIsEditingAddress] = useState(false)
+
+  // Dialog states
+  const [selectedSingleSection, setSelectedSingleSection] = useState<
+    ProfileSectionKey | undefined
+  >(undefined)
+  const [isCompletingProfile, setIsCompletingProfile] = useState(false)
   const [isEditingFamily, setIsEditingFamily] = useState(false)
-  const [isEditingSocioEconomic, setIsEditingSocioEconomic] = useState(false)
   const [isEditingAvatar, setIsEditingAvatar] = useState(false)
   const [isCropping, setIsCropping] = useState(false)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
 
-  // Member selection states
+  // Member selection states (for family dialog)
   const [allMembers, setAllMembers] = useState<MemberOption[]>([])
   const [loadingMembers, setLoadingMembers] = useState(false)
 
-  // Form states
+  // Form states (for family dialog)
   const [editForm, setEditForm] = useState<Partial<UserProfile>>({})
 
   const fetchProfile = useCallback(async () => {
@@ -129,27 +169,88 @@ export default function Profile() {
         return
       }
 
-      const { data, error } = await supabase
+      const requestedProfileId = searchParams.get("id")
+
+      let query = supabase
         .from("profiles")
         .select(
           `
-                    *,
-                    home_groups:home_group_id (location_text),
-                    discipler:discipler_id (full_name),
-                    spouse:spouse_id (full_name),
-                    father:father_id (full_name),
-                    mother:mother_id (full_name)
-                `
+            *,
+            home_groups:home_group_id (location_text),
+            discipler:discipler_id (full_name),
+            spouse:spouse_id (full_name),
+            father:father_id (full_name),
+            mother:mother_id (full_name)
+          `
         )
-        .eq("user_id", session.user.id)
-        .single()
+
+      if (requestedProfileId) {
+        query = query.eq("id", requestedProfileId)
+      } else {
+        query = query.eq("user_id", session.user.id)
+      }
+
+      const { data, error } = await query.single()
 
       if (error) throw error
       if (data) {
+        const isOwn = requestedProfileId ? data.user_id === session.user.id : true
+        if (!isOwn && !isManagement) {
+          navigate("/perfil", { replace: true })
+          toast.error("Você não tem permissão para visualizar o perfil de outros discípulos.")
+          return
+        }
+        setIsOwnProfile(isOwn)
+
+        const getRelationName = (rel: unknown): string | undefined => {
+          if (!rel) return undefined
+          if (Array.isArray(rel)) {
+            return (rel[0] as { full_name?: string })?.full_name || undefined
+          }
+          return (rel as { full_name?: string }).full_name || undefined
+        }
+
+        let spouseId = data.spouse_id || undefined
+        let spouseName = getRelationName(data.spouse)
+
+        if (!spouseId) {
+          try {
+            const { data: revSpouse } = await supabase
+              .from("profiles")
+              .select("id, full_name")
+              .eq("spouse_id", data.id)
+              .maybeSingle()
+
+            if (revSpouse) {
+              spouseId = revSpouse.id
+              spouseName = revSpouse.full_name
+            }
+          } catch (err) {
+            console.error("Erro ao buscar cônjuge reverso:", err)
+          }
+        }
+
+        let childrenList: ChildProfile[] = []
+        try {
+          const { data: childrenData, error: childrenError } = await supabase
+            .from("profiles")
+            .select("id, full_name, avatar_url, birth_date, baptism_date, is_baptized, gender, user_id, phone")
+            .or(`father_id.eq.${data.id},mother_id.eq.${data.id}`)
+            .order("birth_date", { ascending: true })
+
+          if (!childrenError && childrenData) {
+            childrenList = childrenData
+          }
+        } catch (childErr) {
+          console.error("Erro ao buscar filhos:", childErr)
+        }
+
         setProfile({
           id: data.id,
+          user_id: data.user_id || undefined,
           full_name: data.full_name,
-          email: session.user.email || "",
+          email: isOwn ? (session.user.email || data.email || "") : (data.email || ""),
+          is_church_linked: !!data.is_church_linked,
           is_dev: !!data.is_dev,
           is_presbyter: !!data.is_presbyter,
           is_deacon: !!data.is_deacon,
@@ -166,17 +267,19 @@ export default function Profile() {
           address_city: data.address_city || undefined,
           address_state: data.address_state || undefined,
           address_zip_code: data.address_zip_code || undefined,
+          is_baptized: data.is_baptized ?? (Boolean(data.baptism_date) || false),
           baptism_date: data.baptism_date || undefined,
           home_group_id: data.home_group_id || undefined,
           discipler_id: data.discipler_id || undefined,
-          spouse_id: data.spouse_id || undefined,
+          spouse_id: spouseId,
           father_id: data.father_id || undefined,
           mother_id: data.mother_id || undefined,
-          home_group_name: (data.home_groups as any)?.location_text,
-          discipler_name: (data.discipler as any)?.full_name,
-          spouse_name: (data.spouse as any)?.full_name,
-          father_name: (data.father as any)?.full_name,
-          mother_name: (data.mother as any)?.full_name,
+          home_group_name: data.home_groups?.location_text || undefined,
+          discipler_name: getRelationName(data.discipler) || data.custom_discipler_name || undefined,
+          is_custom_discipler: !data.discipler_id && Boolean(data.custom_discipler_name),
+          spouse_name: spouseName,
+          father_name: getRelationName(data.father),
+          mother_name: getRelationName(data.mother),
           occupation: data.occupation,
           education_level: data.education_level,
           employment_status: data.employment_status,
@@ -184,6 +287,7 @@ export default function Profile() {
           dependents_count: data.dependents_count,
           housing_status: data.housing_status,
           drivers_license: data.drivers_license,
+          children: childrenList,
         })
       }
     } catch (error) {
@@ -191,7 +295,7 @@ export default function Profile() {
     } finally {
       setLoading(false)
     }
-  }, [navigate])
+  }, [navigate, searchParams])
 
   const fetchAllMembers = useCallback(async () => {
     if (allMembers.length > 0) return
@@ -204,7 +308,7 @@ export default function Profile() {
       if (error) throw error
       setAllMembers(data || [])
     } catch (error) {
-      console.error("Erro ao carregar membros:", error)
+      console.error("Erro ao carregar discípulos:", error)
     } finally {
       setLoadingMembers(false)
     }
@@ -214,23 +318,27 @@ export default function Profile() {
     fetchProfile()
   }, [fetchProfile])
 
-  // Automática abertura de diálogo via query param
+  // Abertura automática de diálogo via query param
   useEffect(() => {
-    if (profile && searchParams.get("edit") === "socio") {
-      setEditForm({
-        occupation: profile.occupation,
-        education_level: profile.education_level,
-        employment_status: profile.employment_status,
-        household_income: profile.household_income,
-        dependents_count: profile.dependents_count,
-        housing_status: profile.housing_status,
-        drivers_license: profile.drivers_license,
-      })
-      setIsEditingSocioEconomic(true)
-      // Opcional: remover o query param para não reabrir ao atualizar
-      // window.history.replaceState({}, '', window.location.pathname);
+    if (isOwnProfile && profile) {
+      if (searchParams.get("complete") === "true") {
+        setSelectedSingleSection(undefined)
+        setIsCompletingProfile(true)
+      } else if (searchParams.get("edit") === "socio") {
+        setSelectedSingleSection("socio")
+        setIsCompletingProfile(true)
+      } else if (searchParams.get("edit") === "personal") {
+        setSelectedSingleSection("personal")
+        setIsCompletingProfile(true)
+      } else if (searchParams.get("edit") === "address") {
+        setSelectedSingleSection("address")
+        setIsCompletingProfile(true)
+      } else if (searchParams.get("edit") === "contact") {
+        setSelectedSingleSection("contact")
+        setIsCompletingProfile(true)
+      }
     }
-  }, [profile, searchParams])
+  }, [profile, searchParams, isOwnProfile])
 
   const handleSaveProfile = async (updates: Partial<UserProfile>) => {
     try {
@@ -247,14 +355,12 @@ export default function Profile() {
 
       if (error) throw error
 
-      toast.success("Perfil atualizado com sucesso!")
+      toast.success("Família atualizada com sucesso!")
       await fetchProfile()
-      setIsEditingContact(false)
-      setIsEditingAddress(false)
+      invalidateCurrentUserProfileCache()
       setIsEditingFamily(false)
-      setIsEditingSocioEconomic(false)
     } catch (error) {
-      console.error("Erro ao salvar perfil:", error)
+      console.error("Erro ao salvar vínculos:", error)
       toast.error("Erro ao salvar as alterações.")
     } finally {
       setSaving(false)
@@ -264,20 +370,39 @@ export default function Profile() {
   const handleAvatarSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
+    setAvatarFile(file)
     setAvatarPreview(URL.createObjectURL(file))
     setIsCropping(true)
+    event.target.value = ""
   }
 
-  const handleCropComplete = (croppedBlob: Blob) => {
-    if (!avatarPreview) return
+  const handleEditExistingPhoto = async () => {
+    if (!profile?.avatar_url) return
+    try {
+      setSaving(true)
+      const response = await fetch(profile.avatar_url)
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      setAvatarPreview(objectUrl)
+      setIsCropping(true)
+    } catch (err) {
+      console.error("Erro ao carregar foto existente:", err)
+      setAvatarPreview(profile.avatar_url)
+      setIsCropping(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCropComplete = async (croppedBlob: Blob) => {
     const file = new File([croppedBlob], "avatar.jpg", { type: "image/jpeg" })
     setAvatarFile(file)
-    setAvatarPreview(URL.createObjectURL(croppedBlob))
-    setIsCropping(false)
+    await handleAvatarUpload(file)
   }
 
-  const handleAvatarUpload = async () => {
-    if (!avatarFile) return
+  const handleAvatarUpload = async (fileToUpload?: File) => {
+    const file = fileToUpload || avatarFile
+    if (!file) return
 
     try {
       setSaving(true)
@@ -286,28 +411,48 @@ export default function Profile() {
       } = await supabase.auth.getSession()
       if (!session?.user) return
 
-      // 1. Delete old avatar if exists
+      const userId = session.user.id
+
       if (profile?.avatar_url) {
         try {
-          // Extract path from URL: .../storage/v1/object/public/avatars/PATH
           const urlParts = profile.avatar_url.split("/avatars/")
           if (urlParts.length > 1) {
-            const oldPath = urlParts[1]
-            await supabase.storage.from("avatars").remove([oldPath])
+            const oldPath = decodeURIComponent(urlParts[1].split("?")[0])
+            if (oldPath) {
+              await supabase.storage.from("avatars").remove([oldPath])
+            }
           }
         } catch (deleteError) {
-          // Log error but don't block upload if deletion fails
           console.error("Erro ao deletar avatar antigo:", deleteError)
         }
       }
 
-      const fileExt = avatarFile.name.split(".").pop()
-      const fileName = `${session.user.id}-${Date.now()}.${fileExt}`
-      const filePath = `${fileName}`
+      try {
+        const { data: rootFiles } = await supabase.storage
+          .from("avatars")
+          .list("", { search: userId })
+
+        if (rootFiles && rootFiles.length > 0) {
+          const legacyFiles = rootFiles
+            .filter((f) => f.name.startsWith(userId))
+            .map((f) => f.name)
+          if (legacyFiles.length > 0) {
+            await supabase.storage.from("avatars").remove(legacyFiles)
+          }
+        }
+      } catch (cleanupError) {
+        console.error("Erro na limpeza de arquivos antigos:", cleanupError)
+      }
+
+      const fileExt = file.name.split(".").pop() || "jpg"
+      const filePath = `${userId}/avatar.${fileExt}`
 
       const { error: uploadError } = await supabase.storage
         .from("avatars")
-        .upload(filePath, avatarFile)
+        .upload(filePath, file, {
+          upsert: true,
+          contentType: file.type || "image/jpeg",
+        })
 
       if (uploadError) throw uploadError
 
@@ -315,16 +460,20 @@ export default function Profile() {
         data: { publicUrl },
       } = supabase.storage.from("avatars").getPublicUrl(filePath)
 
+      const publicUrlWithTimestamp = `${publicUrl}?t=${Date.now()}`
+
       const { error: updateError } = await supabase
         .from("profiles")
-        .update({ avatar_url: publicUrl })
-        .eq("user_id", session.user.id)
+        .update({ avatar_url: publicUrlWithTimestamp })
+        .eq("user_id", userId)
 
       if (updateError) throw updateError
 
       toast.success("Foto de perfil atualizada!")
       await fetchProfile()
+      invalidateCurrentUserProfileCache()
       setIsEditingAvatar(false)
+      setIsCropping(false)
       setAvatarPreview(null)
       setAvatarFile(null)
     } catch (error) {
@@ -363,7 +512,7 @@ export default function Profile() {
     if (profile.is_dev) roles.push("Desenvolvedor")
     if (profile.is_presbyter) roles.push("Presbítero")
     if (profile.is_deacon) roles.push("Diácono")
-    if (roles.length === 0) roles.push("Membro")
+    if (roles.length === 0) roles.push("Discípulo")
     return roles.join(" • ")
   }
 
@@ -388,28 +537,52 @@ export default function Profile() {
     }
   }
 
+  const getAge = (birthDateString?: string | null) => {
+    if (!birthDateString) return null
+    try {
+      const years = differenceInYears(new Date(), new Date(birthDateString))
+      return years >= 0 ? years : null
+    } catch {
+      return null
+    }
+  }
+
+  const getChildRelationLabel = (gender?: string | null) => {
+    const g = gender?.toUpperCase()
+    if (g === "M" || g === "MASCULINO") return "Filho"
+    if (g === "F" || g === "FEMININO") return "Filha"
+    return "Filho(a)"
+  }
+
   const InfoSection = ({
     title,
     icon: Icon,
     children,
     onEdit,
+    isPending,
   }: {
     title: string
-    icon: any
+    icon: LucideIcon | React.ComponentType<{ className?: string }>
     children: React.ReactNode
     onEdit?: () => void
+    isPending?: boolean
   }) => (
     <div className="space-y-4">
       <div className="flex items-center justify-between text-primary">
         <div className="flex items-center gap-2">
-          <Icon className="size-5" />
+          <Icon className="size-5 shrink-0" />
           <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+          {isPending && (
+            <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400 border border-amber-500/20">
+              Pendente
+            </span>
+          )}
         </div>
         {onEdit && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 gap-2 rounded-full text-xs font-semibold hover:bg-primary/10"
+            className="h-8 gap-2 rounded-full text-xs font-semibold hover:bg-primary/10 min-h-[44px]"
             onClick={onEdit}
           >
             <PencilIcon className="size-3" />
@@ -427,34 +600,111 @@ export default function Profile() {
     label,
     value,
     icon: ItemIcon,
+    onClick,
   }: {
     label: string
     value: string | undefined | null
-    icon?: any
+    icon?: LucideIcon | React.ComponentType<{ className?: string }>
+    onClick?: () => void
   }) => (
-    <div className="min-w-0 space-y-1">
+    <div
+      className={cn(
+        "min-w-0 space-y-1",
+        onClick && value && "group cursor-pointer min-h-[44px]"
+      )}
+      onClick={value ? onClick : undefined}
+      role={onClick && value ? "button" : undefined}
+      tabIndex={onClick && value ? 0 : undefined}
+      onKeyDown={
+        onClick && value
+          ? (e) => (e.key === "Enter" || e.key === " ") && onClick()
+          : undefined
+      }
+    >
       <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
         {label}
       </p>
       <div className="flex items-center gap-2">
         {ItemIcon && (
-          <ItemIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <ItemIcon className="size-3.5 shrink-0 text-muted-foreground group-hover:text-primary transition-colors" />
         )}
-        <p className="truncate text-sm font-medium text-foreground">
+        <p
+          className={cn(
+            "truncate text-sm font-medium text-foreground",
+            onClick && value && "group-hover:text-primary group-hover:underline transition-colors"
+          )}
+        >
           {value || "Não informado"}
         </p>
       </div>
     </div>
   )
 
+  const missingFieldsList = getMissingProfileFields(profile)
+  const isProfileIncomplete = isOwnProfile && profile.is_church_linked && missingFieldsList.length > 0
+
   return (
     <div className="animate-in space-y-8 duration-500 fade-in slide-in-from-bottom-4">
+      {!isOwnProfile && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate(-1)}
+          className="h-10 gap-2 rounded-xl text-muted-foreground hover:text-foreground mb-2 min-h-[44px]"
+        >
+          <ArrowLeftIcon className="size-4" />
+          Voltar
+        </Button>
+      )}
+
       <div className="border-b border-border pb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Meu Perfil</h1>
+        <h1 className="text-3xl font-bold tracking-tight">
+          {isOwnProfile ? "Meu Perfil" : `Perfil de ${profile.full_name}`}
+        </h1>
         <p className="mt-1 text-muted-foreground">
-          Gerencie suas informações pessoais e de vínculo com a igreja.
+          {isOwnProfile
+            ? "Gerencie suas informações pessoais e de vínculo com a igreja."
+            : "Informações de cadastro e vínculos na igreja."}
         </p>
       </div>
+
+      {/* Banner de Cadastro Incompleto */}
+      {isProfileIncomplete && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 sm:p-5 text-sm text-foreground flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AlertCircleIcon className="size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-amber-900 dark:text-amber-200">Cadastro Incompleto</p>
+              <p className="text-xs text-muted-foreground">
+                Existem informações obrigatórias pendentes no seu cadastro ({missingFieldsList.length} campos restantes).
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => {
+              setSelectedSingleSection(undefined)
+              setIsCompletingProfile(true)
+            }}
+            size="sm"
+            className="min-h-[44px] rounded-xl font-bold gap-2 shrink-0 w-full sm:w-auto shadow-sm"
+          >
+            Completar Cadastro
+            <ArrowRightIcon className="size-4" />
+          </Button>
+        </div>
+      )}
+
+      {!profile.is_church_linked && isOwnProfile && (
+        <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 text-sm text-muted-foreground flex items-start gap-3">
+          <InfoIcon className="size-5 text-primary shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-semibold text-foreground">Conta com Acesso aos Estudos</p>
+            <p className="text-xs leading-relaxed">
+              Você possui acesso completo aos ensinos, materiais e à página inicial. Se você já caminha na Igreja em Belo Horizonte, solicite ao seu discipulador ou líder de Grupo Caseiro para registrar o seu vínculo.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         <Card className="h-fit overflow-hidden rounded-3xl border-border bg-card/30 shadow-sm backdrop-blur-sm lg:col-span-1">
@@ -462,43 +712,67 @@ export default function Profile() {
             <div className="absolute top-0 left-0 h-32 w-full bg-linear-to-br from-primary/20 to-primary/5" />
             <div className="relative flex flex-col items-center gap-4">
               <div className="group relative">
-                <Avatar className="size-32 border-4 border-background shadow-2xl transition-transform duration-500 hover:scale-105">
+                <Avatar className="size-32 border-4 border-background shadow-2xl transition-all duration-300">
                   <AvatarImage src={profile.avatar_url} />
                   <AvatarFallback className="bg-primary text-4xl font-bold text-primary-foreground">
                     {getInitials(profile.full_name)}
                   </AvatarFallback>
                 </Avatar>
-                <div
-                  className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-full bg-black/40 text-white opacity-0 backdrop-blur-[2px] transition-all group-hover:opacity-100"
-                  onClick={() => {
-                    setAvatarPreview(null)
-                    setAvatarFile(null)
-                    setIsEditingAvatar(true)
-                  }}
-                >
-                  <CameraIcon className="size-8" />
-                </div>
+                {isOwnProfile && (
+                  <div
+                    className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-full bg-black/40 text-white opacity-0 backdrop-blur-[2px] transition-all group-hover:opacity-100"
+                    onClick={() => {
+                      setAvatarPreview(null)
+                      setAvatarFile(null)
+                      setIsEditingAvatar(true)
+                    }}
+                  >
+                    <CameraIcon className="size-8" />
+                  </div>
+                )}
               </div>
               <div className="space-y-2 px-4 text-center">
                 <CardTitle className="text-2xl leading-tight font-bold">
                   {profile.full_name}
                 </CardTitle>
-                <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-bold text-primary">
-                  <ShieldIcon className="size-3" />
-                  {getRole()}
+                <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+                    <ShieldIcon className="size-3" />
+                    {getRole()}
+                  </div>
+                  {profile.is_church_linked ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      Discípulo Vinculado
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                      Conta de Estudos / Não Vinculado
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4 px-6 pt-4 pb-8">
-            <Button
-              variant="destructive"
-              className="w-full gap-2 rounded-xl py-6 font-bold shadow-lg shadow-destructive/10"
-              onClick={handleLogout}
-            >
-              <LogOutIcon className="size-4" />
-              Sair da Conta
-            </Button>
+            {isOwnProfile ? (
+              <Button
+                variant="destructive"
+                className="w-full gap-2 rounded-xl py-6 font-bold shadow-lg shadow-destructive/10 min-h-[44px]"
+                onClick={handleLogout}
+              >
+                <LogOutIcon className="size-4" />
+                Sair da Conta
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-full gap-2 rounded-xl py-6 font-bold min-h-[44px]"
+                onClick={() => navigate("/perfil")}
+              >
+                <UserIcon className="size-4" />
+                Ver Meu Perfil
+              </Button>
+            )}
             <p className="text-center text-[10px] font-bold tracking-widest text-muted-foreground uppercase opacity-50">
               ID: {profile.id}
             </p>
@@ -508,11 +782,24 @@ export default function Profile() {
         <div className="space-y-8 lg:col-span-2">
           <Card className="overflow-hidden rounded-3xl border-border bg-card/30 shadow-sm backdrop-blur-sm">
             <CardContent className="space-y-12 p-6 md:p-10">
-              <InfoSection title="Informações Pessoais" icon={UserIcon}>
+              {/* Informações Pessoais */}
+              <InfoSection
+                title="Informações Pessoais"
+                icon={UserIcon}
+                isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "personal")}
+                onEdit={
+                  isOwnProfile
+                    ? () => {
+                        setSelectedSingleSection("personal")
+                        setIsCompletingProfile(true)
+                      }
+                    : undefined
+                }
+              >
                 <InfoItem label="Nome Completo" value={profile.full_name} />
                 <InfoItem
                   label="CPF"
-                  value={profile.cpf}
+                  value={profile.cpf ? formatCPF(profile.cpf) : undefined}
                   icon={FingerprintIcon}
                 />
                 <InfoItem
@@ -520,26 +807,34 @@ export default function Profile() {
                   value={formatDate(profile.birth_date)}
                   icon={CalendarIcon}
                 />
-                <InfoItem label="Gênero" value={profile.gender} />
+                <InfoItem
+                  label="Gênero"
+                  value={formatDisplayGender(profile.gender)}
+                />
                 <InfoItem
                   label="Estado Civil"
-                  value={profile.marital_status}
+                  value={formatDisplayMaritalStatus(profile.marital_status)}
                   icon={HeartIcon}
                 />
               </InfoSection>
 
+              {/* Família */}
               <InfoSection
-                title="Vínculos Familiares"
+                title="Família"
                 icon={HeartIcon}
-                onEdit={() => {
-                  setEditForm({
-                    spouse_id: profile.spouse_id,
-                    father_id: profile.father_id,
-                    mother_id: profile.mother_id,
-                  })
-                  fetchAllMembers()
-                  setIsEditingFamily(true)
-                }}
+                onEdit={
+                  isOwnProfile
+                    ? () => {
+                        setEditForm({
+                          spouse_id: profile.spouse_id,
+                          father_id: profile.father_id,
+                          mother_id: profile.mother_id,
+                        })
+                        fetchAllMembers()
+                        setIsEditingFamily(true)
+                      }
+                    : undefined
+                }
               >
                 <InfoItem
                   label="Cônjuge"
@@ -558,15 +853,85 @@ export default function Profile() {
                     icon={UserIcon}
                   />
                 </div>
+
+                {profile.children && profile.children.length > 0 && (
+                  <div className="col-span-1 space-y-3 pt-3 border-t border-border/40 sm:col-span-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
+                        Filhos ({profile.children.length})
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {profile.children.map((child) => {
+                        const age = getAge(child.birth_date)
+                        const relationLabel = getChildRelationLabel(child.gender)
+                        return (
+                          <div
+                            key={child.id}
+                            className="flex items-center justify-between rounded-xl border border-border/60 bg-background/50 p-3 min-h-[48px]"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <Avatar className="size-10 shrink-0 border border-border/60">
+                                {child.avatar_url && (
+                                  <AvatarImage
+                                    src={child.avatar_url}
+                                    alt={child.full_name}
+                                  />
+                                )}
+                                <AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">
+                                  {getInitials(child.full_name)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-foreground">
+                                  {child.full_name}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                  <span>{relationLabel}</span>
+                                  {age !== null && (
+                                    <>
+                                      <span>•</span>
+                                      <span>
+                                        {age} {age === 1 ? "ano" : "anos"}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0 ml-2">
+                              {child.is_baptized || child.baptism_date ? (
+                                <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-500/20 dark:text-emerald-400">
+                                  Batizado(a)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-medium text-zinc-700 border border-zinc-500/20 dark:text-zinc-300">
+                                  Não batizado(a)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </InfoSection>
 
+              {/* Informações de Contato */}
               <InfoSection
                 title="Contato"
                 icon={PhoneIcon}
-                onEdit={() => {
-                  setEditForm({ phone: profile.phone })
-                  setIsEditingContact(true)
-                }}
+                isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "contact")}
+                onEdit={
+                  isOwnProfile
+                    ? () => {
+                        setSelectedSingleSection("contact")
+                        setIsCompletingProfile(true)
+                      }
+                    : undefined
+                }
               >
                 <InfoItem
                   label="E-mail"
@@ -580,21 +945,19 @@ export default function Profile() {
                 />
               </InfoSection>
 
+              {/* Endereço Residencial */}
               <InfoSection
                 title="Endereço"
                 icon={MapPinIcon}
-                onEdit={() => {
-                  setEditForm({
-                    address_street: profile.address_street,
-                    address_number: profile.address_number,
-                    address_complement: profile.address_complement,
-                    address_neighborhood: profile.address_neighborhood,
-                    address_city: profile.address_city,
-                    address_state: profile.address_state,
-                    address_zip_code: profile.address_zip_code,
-                  })
-                  setIsEditingAddress(true)
-                }}
+                isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "address")}
+                onEdit={
+                  isOwnProfile
+                    ? () => {
+                        setSelectedSingleSection("address")
+                        setIsCompletingProfile(true)
+                      }
+                    : undefined
+                }
               >
                 <div className="grid grid-cols-1 gap-6 sm:col-span-2 sm:grid-cols-2">
                   <InfoItem label="Rua" value={profile.address_street} />
@@ -617,10 +980,17 @@ export default function Profile() {
                 </div>
               </InfoSection>
 
-              <InfoSection title="Vida Eclesiástica" icon={UsersIcon}>
+              {/* Vínculos */}
+              <InfoSection title="Vínculos" icon={UsersIcon}>
                 <InfoItem
                   label="Batismo"
-                  value={formatDate(profile.baptism_date)}
+                  value={
+                    profile.is_baptized
+                      ? profile.baptism_date
+                        ? formatDate(profile.baptism_date)
+                        : "Sim (Data não informada)"
+                      : "Não batizado"
+                  }
                   icon={CalendarIcon}
                 />
                 <InfoItem
@@ -630,26 +1000,30 @@ export default function Profile() {
                 />
                 <InfoItem
                   label="Discipulador"
-                  value={profile.discipler_name}
+                  value={
+                    profile.discipler_name
+                      ? profile.is_custom_discipler
+                        ? `${profile.discipler_name} (Não cadastrado no sistema)`
+                        : profile.discipler_name
+                      : undefined
+                  }
                   icon={UserIcon}
                 />
               </InfoSection>
 
+              {/* Informações Socioeconômicas */}
               <InfoSection
                 title="Informações Socioeconômicas"
                 icon={ShieldIcon}
-                onEdit={() => {
-                  setEditForm({
-                    occupation: profile.occupation,
-                    education_level: profile.education_level,
-                    employment_status: profile.employment_status,
-                    household_income: profile.household_income,
-                    dependents_count: profile.dependents_count,
-                    housing_status: profile.housing_status,
-                    drivers_license: profile.drivers_license,
-                  })
-                  setIsEditingSocioEconomic(true)
-                }}
+                isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "socio")}
+                onEdit={
+                  isOwnProfile
+                    ? () => {
+                        setSelectedSingleSection("socio")
+                        setIsCompletingProfile(true)
+                      }
+                    : undefined
+                }
               >
                 <InfoItem label="Profissão" value={profile.occupation} />
                 <InfoItem
@@ -679,7 +1053,7 @@ export default function Profile() {
                 </p>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Suas informações são tratadas com segurança absoluta e de
-                  acordo com as políticas da Igreja em BH.
+                  acordo com as diretrizes da Igreja em Belo Horizonte.
                 </p>
               </div>
             </CardFooter>
@@ -687,55 +1061,22 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* Dialogs */}
-      <Dialog open={isEditingContact} onOpenChange={setIsEditingContact}>
-        <DialogContent className="rounded-3xl border-border/50 bg-card/95 backdrop-blur-xl">
-          <DialogHeader>
-            <DialogTitle>Editar Contato</DialogTitle>
-            <DialogDescription>
-              Atualize seu número de telefone abaixo.
-            </DialogDescription>
-          </DialogHeader>
-          <FieldGroup className="pt-2">
-            <Field>
-              <FieldLabel htmlFor="phone">Telefone</FieldLabel>
-              <Input
-                id="phone"
-                value={editForm.phone || ""}
-                onChange={(e) =>
-                  setEditForm({ ...editForm, phone: e.target.value })
-                }
-                placeholder="(31) 99999-9999"
-                className="rounded-xl border-border/50"
-              />
-            </Field>
-          </FieldGroup>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setIsEditingContact(false)}
-              className="rounded-xl border-border/50"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => handleSaveProfile({ phone: editForm.phone })}
-              disabled={saving}
-              className="rounded-xl shadow-lg shadow-primary/20"
-            >
-              {saving && <Loader2Icon className="mr-2 size-4 animate-spin" />}
-              Salvar Alterações
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Dialog Unificado: Completar Incremental ou Editar Categoria */}
+      <CompleteProfileDialog
+        open={isCompletingProfile}
+        onOpenChange={setIsCompletingProfile}
+        profile={profile}
+        singleSection={selectedSingleSection}
+        onSuccess={fetchProfile}
+      />
 
+      {/* Dialog Família */}
       <Dialog open={isEditingFamily} onOpenChange={setIsEditingFamily}>
-        <DialogContent className="rounded-3xl border-border/50 bg-card/95 backdrop-blur-xl sm:max-w-md">
+        <DialogContent size="lg" className="rounded-3xl border-border/50 bg-card/95 backdrop-blur-xl">
           <DialogHeader>
-            <DialogTitle>Vínculos Familiares</DialogTitle>
+            <DialogTitle>Família</DialogTitle>
             <DialogDescription>
-              Selecione os membros da sua família cadastrados na igreja.
+              Selecione os familiares cadastrados na igreja.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
@@ -744,7 +1085,10 @@ export default function Profile() {
               <Combobox
                 value={
                   allMembers.find((m) => m.id === editForm.spouse_id)
-                    ?.full_name || ""
+                    ?.full_name ||
+                  (editForm.spouse_id === profile.spouse_id
+                    ? profile.spouse_name || ""
+                    : "")
                 }
                 onValueChange={(name) => {
                   const member = allMembers.find((m) => m.full_name === name)
@@ -758,7 +1102,7 @@ export default function Profile() {
                   placeholder={
                     loadingMembers ? "Carregando..." : "Buscar cônjuge..."
                   }
-                  className="rounded-xl"
+                  className="rounded-xl min-h-[44px]"
                 >
                   <SearchIcon className="h-4 w-4 text-muted-foreground" />
                 </ComboboxInput>
@@ -773,7 +1117,7 @@ export default function Profile() {
                         </ComboboxItem>
                       ))}
                   </ComboboxList>
-                  <ComboboxEmpty>Nenhum membro encontrado.</ComboboxEmpty>
+                  <ComboboxEmpty>Nenhum irmão encontrado.</ComboboxEmpty>
                 </ComboboxContent>
               </Combobox>
             </Field>
@@ -783,7 +1127,10 @@ export default function Profile() {
               <Combobox
                 value={
                   allMembers.find((m) => m.id === editForm.father_id)
-                    ?.full_name || ""
+                    ?.full_name ||
+                  (editForm.father_id === profile.father_id
+                    ? profile.father_name || ""
+                    : "")
                 }
                 onValueChange={(name) => {
                   const member = allMembers.find((m) => m.full_name === name)
@@ -795,7 +1142,7 @@ export default function Profile() {
               >
                 <ComboboxInput
                   placeholder="Buscar pai..."
-                  className="rounded-xl"
+                  className="rounded-xl min-h-[44px]"
                 />
                 <ComboboxContent>
                   <ComboboxList>
@@ -817,7 +1164,10 @@ export default function Profile() {
               <Combobox
                 value={
                   allMembers.find((m) => m.id === editForm.mother_id)
-                    ?.full_name || ""
+                    ?.full_name ||
+                  (editForm.mother_id === profile.mother_id
+                    ? profile.mother_name || ""
+                    : "")
                 }
                 onValueChange={(name) => {
                   const member = allMembers.find((m) => m.full_name === name)
@@ -829,7 +1179,7 @@ export default function Profile() {
               >
                 <ComboboxInput
                   placeholder="Buscar mãe..."
-                  className="rounded-xl"
+                  className="rounded-xl min-h-[44px]"
                 />
                 <ComboboxContent>
                   <ComboboxList>
@@ -845,178 +1195,74 @@ export default function Profile() {
                 </ComboboxContent>
               </Combobox>
             </Field>
+
+            {profile.children && profile.children.length > 0 && (
+              <div className="space-y-2 rounded-xl border border-border/50 bg-muted/30 p-3">
+                <p className="text-xs font-semibold text-foreground">
+                  Filhos Cadastrados ({profile.children.length})
+                </p>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                  {profile.children.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between text-xs text-muted-foreground"
+                    >
+                      <span className="font-medium text-foreground truncate">
+                        {c.full_name}
+                      </span>
+                      <span className="shrink-0 ml-2">
+                        {getChildRelationLabel(c.gender)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/30">
+                  O cadastro e vínculo de dependentes é gerenciado pastoralmente na gestão do corpo.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
               variant="outline"
               onClick={() => setIsEditingFamily(false)}
-              className="rounded-xl border-border/50"
+              className="rounded-xl border-border/50 min-h-[44px]"
             >
               Cancelar
             </Button>
             <Button
               onClick={() =>
                 handleSaveProfile({
-                  spouse_id: editForm.spouse_id || (null as any),
-                  father_id: editForm.father_id || (null as any),
-                  mother_id: editForm.mother_id || (null as any),
+                  spouse_id: editForm.spouse_id || null,
+                  father_id: editForm.father_id || null,
+                  mother_id: editForm.mother_id || null,
                 })
               }
               disabled={saving}
-              className="rounded-xl shadow-lg shadow-primary/20"
+              className="rounded-xl shadow-lg shadow-primary/20 min-h-[44px]"
             >
               {saving && <Loader2Icon className="mr-2 size-4 animate-spin" />}
-              Salvar Vínculos
+              Salvar Família
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isEditingAddress} onOpenChange={setIsEditingAddress}>
-        <DialogContent className="rounded-3xl border-border/50 bg-card/95 backdrop-blur-xl sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Editar Endereço</DialogTitle>
-            <DialogDescription>
-              Atualize seu endereço completo.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="no-scrollbar max-h-[60vh] overflow-y-auto px-1">
-            <FieldGroup className="gap-6 pt-2">
-              <Field>
-                <FieldLabel htmlFor="street">Rua</FieldLabel>
-                <Input
-                  id="street"
-                  value={editForm.address_street || ""}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, address_street: e.target.value })
-                  }
-                  className="rounded-xl border-border/50"
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-4">
-                <Field>
-                  <FieldLabel htmlFor="number">Número</FieldLabel>
-                  <Input
-                    id="number"
-                    value={editForm.address_number || ""}
-                    onChange={(e) =>
-                      setEditForm({
-                        ...editForm,
-                        address_number: e.target.value,
-                      })
-                    }
-                    className="rounded-xl border-border/50"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="complement">Complemento</FieldLabel>
-                  <Input
-                    id="complement"
-                    value={editForm.address_complement || ""}
-                    onChange={(e) =>
-                      setEditForm({
-                        ...editForm,
-                        address_complement: e.target.value,
-                      })
-                    }
-                    className="rounded-xl border-border/50"
-                  />
-                </Field>
-              </div>
-              <Field>
-                <FieldLabel htmlFor="neighborhood">Bairro</FieldLabel>
-                <Input
-                  id="neighborhood"
-                  value={editForm.address_neighborhood || ""}
-                  onChange={(e) =>
-                    setEditForm({
-                      ...editForm,
-                      address_neighborhood: e.target.value,
-                    })
-                  }
-                  className="rounded-xl border-border/50"
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-4">
-                <Field>
-                  <FieldLabel htmlFor="city">Cidade</FieldLabel>
-                  <Input
-                    id="city"
-                    value={editForm.address_city || ""}
-                    onChange={(e) =>
-                      setEditForm({ ...editForm, address_city: e.target.value })
-                    }
-                    className="rounded-xl border-border/50"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="state">Estado</FieldLabel>
-                  <Input
-                    id="state"
-                    value={editForm.address_state || ""}
-                    onChange={(e) =>
-                      setEditForm({
-                        ...editForm,
-                        address_state: e.target.value,
-                      })
-                    }
-                    maxLength={2}
-                    className="rounded-xl border-border/50"
-                  />
-                </Field>
-              </div>
-              <Field>
-                <FieldLabel htmlFor="zip">CEP</FieldLabel>
-                <Input
-                  id="zip"
-                  value={editForm.address_zip_code || ""}
-                  onChange={(e) =>
-                    setEditForm({
-                      ...editForm,
-                      address_zip_code: e.target.value,
-                    })
-                  }
-                  className="rounded-xl border-border/50"
-                />
-              </Field>
-            </FieldGroup>
-          </div>
-          <DialogFooter className="mt-6 gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setIsEditingAddress(false)}
-              className="rounded-xl border-border/50"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={() =>
-                handleSaveProfile({
-                  address_street: editForm.address_street,
-                  address_number: editForm.address_number,
-                  address_complement: editForm.address_complement,
-                  address_neighborhood: editForm.address_neighborhood,
-                  address_city: editForm.address_city,
-                  address_state: editForm.address_state,
-                  address_zip_code: editForm.address_zip_code,
-                })
-              }
-              disabled={saving}
-              className="rounded-xl shadow-lg shadow-primary/20"
-            >
-              {saving && <Loader2Icon className="mr-2 size-4 animate-spin" />}
-              Salvar Alterações
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isEditingAvatar} onOpenChange={setIsEditingAvatar}>
+      {/* Dialog Foto de Perfil */}
+      <Dialog
+        open={isEditingAvatar}
+        onOpenChange={(open) => {
+          setIsEditingAvatar(open)
+          if (!open) {
+            setIsCropping(false)
+            setAvatarPreview(null)
+            setAvatarFile(null)
+          }
+        }}
+      >
         <DialogContent
-          className={cn(
-            "rounded-3xl border-border/50 bg-card/95 backdrop-blur-xl",
-            isCropping ? "sm:max-w-[425px]" : ""
-          )}
+          size={isCropping ? "lg" : "md"}
+          className="rounded-3xl border-border/50 bg-card/95 backdrop-blur-xl"
         >
           <DialogHeader>
             <DialogTitle>
@@ -1034,289 +1280,63 @@ export default function Profile() {
               <ImageCropper
                 image={avatarPreview}
                 onCropComplete={handleCropComplete}
-                onCancel={() => setIsCropping(false)}
+                onCancel={() => {
+                  setIsCropping(false)
+                  setAvatarPreview(null)
+                  setAvatarFile(null)
+                }}
               />
             </div>
           ) : (
-            <>
-              <div className="flex flex-col items-center gap-6 py-6">
+            <div className="flex flex-col items-center gap-6 py-6">
+              <div className="group relative">
                 <Avatar className="size-56 border-4 border-muted shadow-2xl transition-transform duration-500">
-                  <AvatarImage src={avatarPreview || profile.avatar_url} />
+                  <AvatarImage src={profile.avatar_url} />
                   <AvatarFallback className="bg-primary text-7xl font-bold text-primary-foreground">
                     {getInitials(profile.full_name)}
                   </AvatarFallback>
                 </Avatar>
 
-                <div className="flex w-full flex-col gap-2">
-                  <Button
-                    variant="outline"
-                    className="w-full gap-2 rounded-xl border-border/50 py-6"
-                    asChild
+                {profile.avatar_url && (
+                  <button
+                    type="button"
+                    className="absolute inset-0 flex cursor-pointer flex-col items-center justify-center rounded-full bg-black/50 text-white opacity-0 backdrop-blur-[2px] transition-all group-hover:opacity-100 focus:opacity-100"
+                    onClick={handleEditExistingPhoto}
+                    disabled={saving}
+                    title="Editar foto existente"
                   >
-                    <label
-                      htmlFor="avatar-file-input"
-                      className="cursor-pointer"
-                    >
-                      <CameraIcon className="size-4" />
-                      {avatarFile ? "Escolher outra" : "Trocar Foto de Perfil"}
-                    </label>
-                  </Button>
-                  <input
-                    id="avatar-file-input"
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleAvatarSelect}
-                  />
-                </div>
+                    <PencilIcon className="mb-1 size-8" />
+                    <span className="text-xs font-semibold">Editar foto</span>
+                  </button>
+                )}
               </div>
-              <DialogFooter className="gap-2 sm:gap-0">
+
+              <div className="flex w-full flex-col gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    setIsEditingAvatar(false)
-                    setAvatarPreview(null)
-                    setAvatarFile(null)
-                    setIsCropping(false)
-                  }}
-                  className="rounded-xl border-border/50"
+                  className="w-full gap-2 rounded-xl border-border/50 py-6 min-h-[44px]"
+                  asChild
                 >
-                  Cancelar
+                  <label
+                    htmlFor="avatar-file-input"
+                    className="cursor-pointer"
+                  >
+                    <CameraIcon className="size-4" />
+                    {profile.avatar_url
+                      ? "Trocar Foto de Perfil"
+                      : "Adicionar Foto de Perfil"}
+                  </label>
                 </Button>
-                <Button
-                  onClick={handleAvatarUpload}
-                  disabled={!avatarFile || saving}
-                  className="rounded-xl shadow-lg shadow-primary/20"
-                >
-                  {saving && (
-                    <Loader2Icon className="mr-2 size-4 animate-spin" />
-                  )}
-                  Salvar Nova Foto
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={isEditingSocioEconomic}
-        onOpenChange={setIsEditingSocioEconomic}
-      >
-        <DialogContent className="rounded-3xl border-border/50 bg-card/95 backdrop-blur-xl sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Informações Socioeconômicas</DialogTitle>
-            <DialogDescription>
-              Atualize seus dados profissionais e socioeconômicos.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="no-scrollbar max-h-[60vh] space-y-8 overflow-y-auto px-4 py-4">
-            <Field>
-              <FieldLabel className="text-base font-semibold text-foreground/90">
-                Sua Profissão
-              </FieldLabel>
-              <Input
-                value={editForm.occupation || ""}
-                onChange={(e) =>
-                  setEditForm({ ...editForm, occupation: e.target.value })
-                }
-                placeholder="Ex: Engenheiro, Professor, Autônomo..."
-                className="h-12 rounded-2xl border-border/50 bg-muted/30 text-base shadow-sm focus-visible:ring-primary/20"
-              />
-            </Field>
-
-            <div className="space-y-4">
-              <FieldLabel className="text-base font-semibold text-foreground/90">
-                Qual sua escolaridade?
-              </FieldLabel>
-              <RadioGroup
-                value={editForm.education_level || ""}
-                onValueChange={(val) =>
-                  setEditForm({ ...editForm, education_level: val })
-                }
-                className="mt-2 grid grid-cols-1 gap-2"
-              >
-                {[
-                  "Fundamental",
-                  "Médio Incompleto",
-                  "Médio Completo",
-                  "Superior Incompleto",
-                  "Superior Completo",
-                  "Pós-graduação",
-                ].map((opt) => (
-                  <div key={opt} className="flex items-center space-x-2">
-                    <RadioGroupItem value={opt} id={`edu-${opt}`} />
-                    <FieldLabel
-                      htmlFor={`edu-${opt}`}
-                      className="cursor-pointer font-normal"
-                    >
-                      {opt}
-                    </FieldLabel>
-                  </div>
-                ))}
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-4">
-              <FieldLabel className="text-base font-semibold text-foreground/90">
-                Como é seu vínculo empregatício?
-              </FieldLabel>
-              <RadioGroup
-                value={editForm.employment_status || ""}
-                onValueChange={(val) =>
-                  setEditForm({ ...editForm, employment_status: val })
-                }
-                className="mt-2 grid grid-cols-1 gap-2"
-              >
-                {[
-                  "CLT",
-                  "Autônomo/PJ",
-                  "Empreendedor",
-                  "Desempregado",
-                  "Aposentado",
-                  "Estudante",
-                ].map((opt) => (
-                  <div key={opt} className="flex items-center space-x-2">
-                    <RadioGroupItem value={opt} id={`emp-${opt}`} />
-                    <FieldLabel
-                      htmlFor={`emp-${opt}`}
-                      className="cursor-pointer font-normal"
-                    >
-                      {opt}
-                    </FieldLabel>
-                  </div>
-                ))}
-              </RadioGroup>
-            </div>
-
-            <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-              <div className="space-y-4">
-                <FieldLabel className="text-base font-semibold text-foreground/90">
-                  Situação de Moradia
-                </FieldLabel>
-                <RadioGroup
-                  value={editForm.housing_status || ""}
-                  onValueChange={(val) =>
-                    setEditForm({ ...editForm, housing_status: val })
-                  }
-                  className="mt-2 grid grid-cols-1 gap-2"
-                >
-                  {["Própria", "Alugada", "Cedida/Parentes", "Financiada"].map(
-                    (opt) => (
-                      <div key={opt} className="flex items-center space-x-2">
-                        <RadioGroupItem value={opt} id={`hou-${opt}`} />
-                        <FieldLabel
-                          htmlFor={`hou-${opt}`}
-                          className="cursor-pointer font-normal"
-                        >
-                          {opt}
-                        </FieldLabel>
-                      </div>
-                    )
-                  )}
-                </RadioGroup>
-              </div>
-
-              <div className="space-y-4">
-                <FieldLabel className="text-base font-semibold text-foreground/90">
-                  Renda Familiar
-                </FieldLabel>
-                <RadioGroup
-                  value={editForm.household_income || ""}
-                  onValueChange={(val) =>
-                    setEditForm({ ...editForm, household_income: val })
-                  }
-                  className="mt-2 grid grid-cols-1 gap-2"
-                >
-                  {["Até 1 SM", "1 a 3 SM", "3 a 5 SM", "Acima de 5 SM"].map(
-                    (opt) => (
-                      <div key={opt} className="flex items-center space-x-2">
-                        <RadioGroupItem value={opt} id={`inc-${opt}`} />
-                        <FieldLabel
-                          htmlFor={`inc-${opt}`}
-                          className="cursor-pointer font-normal"
-                        >
-                          {opt}
-                        </FieldLabel>
-                      </div>
-                    )
-                  )}
-                </RadioGroup>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-              <div className="space-y-4">
-                <FieldLabel className="text-base font-semibold text-foreground/90">
-                  Número de Dependentes
-                </FieldLabel>
-                <Input
-                  type="number"
-                  min="0"
-                  value={editForm.dependents_count || 0}
-                  onChange={(e) =>
-                    setEditForm({
-                      ...editForm,
-                      dependents_count: parseInt(e.target.value) || 0,
-                    })
-                  }
-                  className="h-14 rounded-2xl border-border/50 bg-muted/30 text-center text-lg font-semibold shadow-sm focus-visible:ring-primary/20"
+                <input
+                  id="avatar-file-input"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarSelect}
                 />
               </div>
-
-              <div className="space-y-4">
-                <FieldLabel className="text-base font-semibold text-foreground/90">
-                  Categoria CNH
-                </FieldLabel>
-                <RadioGroup
-                  value={editForm.drivers_license || ""}
-                  onValueChange={(val) =>
-                    setEditForm({ ...editForm, drivers_license: val })
-                  }
-                  className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2"
-                >
-                  {["Não possui", "A", "B", "AB", "C", "D", "E"].map((opt) => (
-                    <div key={opt} className="flex items-center space-x-2">
-                      <RadioGroupItem value={opt} id={`cnh-${opt}`} />
-                      <FieldLabel
-                        htmlFor={`cnh-${opt}`}
-                        className="cursor-pointer font-normal"
-                      >
-                        {opt}
-                      </FieldLabel>
-                    </div>
-                  ))}
-                </RadioGroup>
-              </div>
             </div>
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setIsEditingSocioEconomic(false)}
-              className="rounded-xl border-border/50"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={() =>
-                handleSaveProfile({
-                  occupation: editForm.occupation,
-                  education_level: editForm.education_level,
-                  employment_status: editForm.employment_status,
-                  household_income: editForm.household_income,
-                  dependents_count: editForm.dependents_count,
-                  housing_status: editForm.housing_status,
-                  drivers_license: editForm.drivers_license,
-                })
-              }
-              disabled={saving}
-              className="rounded-xl shadow-lg shadow-primary/20"
-            >
-              {saving && <Loader2Icon className="mr-2 size-4 animate-spin" />}
-              Salvar Dados
-            </Button>
-          </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </div>

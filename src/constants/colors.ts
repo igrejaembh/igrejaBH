@@ -1,0 +1,599 @@
+/**
+ * @file colors.ts
+ * @description Centralized color constants for the website.
+ *
+ * ⚠️ REGRAS OBRIGATÓRIAS:
+ * 1. USO: Qualquer cor em runtime JS/TS (Canvas, SVGs, Leaflet, gráficos, estilos inline ou classes utilitárias)
+ *    DEVE ser importada deste arquivo. É proibido usar cores hexadecimais soltas ou hardcoded nos componentes.
+ * 2. ATUALIZAÇÃO: Qualquer nova cor, variação de tom ou token de design introduzido no projeto DEVE ser
+ *    registrado e documentado aqui primeiro.
+ * 3. ACESSIBILIDADE: Toda combinação de cores deve ser validada contra as diretrizes WCAG AA/AAA
+ *    utilizando o MCP `accessibility` (`are-colors-accessible`, `get-color-contrast`, `use-light-or-dark`).
+ */
+
+// ==========================================
+// 1. PALETA BASE (Zinc + Neutrals)
+// ==========================================
+export const PALETTE = {
+  zinc: {
+    50: "#fafafa",
+    100: "#f4f4f5",
+    200: "#e4e4e7",
+    300: "#d4d4d8",
+    400: "#a1a1aa",
+    500: "#71717a",
+    600: "#52525b",
+    700: "#3f3f46",
+    800: "#27272a",
+    900: "#18181b",
+    950: "#09090b",
+  },
+  white: "#ffffff",
+  black: "#000000",
+} as const;
+
+// ==========================================
+// 2. CORES DA MARCA / PRIMÁRIA (OKLCH + Hex)
+// ==========================================
+export const BRAND_COLORS = {
+  primary: {
+    light: {
+      oklch: "oklch(0.35 0.08 155)",
+      hex: "#1b4332", // Deep Forest Olive
+    },
+    dark: {
+      oklch: "oklch(0.88 0.15 145)",
+      hex: "#86efac", // Sage / Mint
+    },
+  },
+  accent: {
+    light: {
+      oklch: "oklch(0.55 0.16 65)",
+      hex: "#b45309", // Warm Amber
+    },
+    dark: {
+      oklch: "oklch(0.82 0.16 80)",
+      hex: "#fbbf24", // Golden Amber
+    },
+  },
+} as const;
+
+// ==========================================
+// 3. TOKENS SEMÂNTICOS POR TEMA (Light / Dark)
+// ==========================================
+export const THEME_TOKENS = {
+  light: {
+    background: "#faf9f6",
+    foreground: "#18181b",
+    card: "#ffffff",
+    cardForeground: "#18181b",
+    popover: "#ffffff",
+    popoverForeground: "#18181b",
+    primary: "#1b4332",
+    primaryForeground: "#fafafa",
+    secondary: "#f4efe6",
+    secondaryForeground: "#1b4332",
+    muted: "#f4efe6",
+    mutedForeground: "#52525b",
+    accent: "#f4efe6",
+    accentForeground: "#92400e",
+    destructive: "#dc2626",
+    destructiveForeground: "#fafafa",
+    border: "#e5e7eb",
+    input: "#e5e7eb",
+    ring: "#1b4332",
+  },
+  dark: {
+    background: "#09090b",
+    foreground: "#fafafa",
+    card: "#18181b",
+    cardForeground: "#fafafa",
+    popover: "#18181b",
+    popoverForeground: "#fafafa",
+    primary: "#86efac",
+    primaryForeground: "#09090b",
+    secondary: "#162e24",
+    secondaryForeground: "#86efac",
+    muted: "#162e24",
+    mutedForeground: "#a1a1aa",
+    accent: "#162e24",
+    accentForeground: "#fbbf24",
+    destructive: "#ef4444",
+    destructiveForeground: "#fafafa",
+    border: "#27272a",
+    input: "#27272a",
+    ring: "#86efac",
+  },
+} as const;
+
+// ==========================================
+// 4. CORES DE FEEDBACK / STATUS
+// ==========================================
+export const STATUS_COLORS = {
+  success: {
+    light: "#16a34a",
+    dark: "#22c55e",
+    bgLight: "rgba(22, 163, 74, 0.1)",
+    bgDark: "rgba(34, 197, 94, 0.15)",
+    borderLight: "rgba(22, 163, 74, 0.2)",
+    borderDark: "rgba(34, 197, 94, 0.25)",
+  },
+  warning: {
+    light: "#d97706",
+    dark: "#f59e0b",
+    bgLight: "rgba(217, 119, 6, 0.1)",
+    bgDark: "rgba(245, 158, 11, 0.15)",
+    borderLight: "rgba(217, 119, 6, 0.2)",
+    borderDark: "rgba(245, 158, 11, 0.25)",
+  },
+  destructive: {
+    light: "#dc2626",
+    dark: "#ef4444",
+    bgLight: "rgba(220, 38, 38, 0.1)",
+    bgDark: "rgba(239, 68, 68, 0.15)",
+    borderLight: "rgba(220, 38, 38, 0.2)",
+    borderDark: "rgba(239, 68, 68, 0.25)",
+  },
+  info: {
+    light: "#2563eb",
+    dark: "#38bdf8",
+    bgLight: "rgba(37, 99, 235, 0.1)",
+    bgDark: "rgba(56, 189, 248, 0.15)",
+    borderLight: "rgba(37, 99, 235, 0.2)",
+    borderDark: "rgba(56, 189, 248, 0.25)",
+  },
+} as const;
+
+// ==========================================
+// 5. VISUALIZAÇÃO DE GRAFOS / CANVAS (Rede de Relacionamentos)
+// ==========================================
+export type GraphNodeRole =
+  | "discipulador"
+  | "lider"
+  | "anfitriao"
+  | "visitante"
+  | "inativo";
+
+export type RelationshipNodeRole =
+  | "presbyter"
+  | "deacon"
+  | "leader"
+  | "discipler"
+  | "disciple"
+  | "child";
+
+export const GRAPH_NODE_COLORS = {
+  discipulador: {
+    light: { stroke: "#e11d48", fill: "rgba(225, 29, 72, 0.12)" },
+    dark: { stroke: "#fb7185", fill: "rgba(251, 113, 133, 0.15)" },
+  },
+  lider: {
+    light: { stroke: "#9333ea", fill: "rgba(147, 51, 234, 0.12)" },
+    dark: { stroke: "#c084fc", fill: "rgba(192, 132, 252, 0.15)" },
+  },
+  anfitriao: {
+    light: { stroke: "#2563eb", fill: "rgba(37, 99, 235, 0.12)" },
+    dark: { stroke: "#60a5fa", fill: "rgba(96, 165, 250, 0.15)" },
+  },
+  visitante: {
+    light: { stroke: "#d97706", fill: "rgba(217, 119, 6, 0.12)" },
+    dark: { stroke: "#fbbf24", fill: "rgba(251, 191, 36, 0.15)" },
+  },
+  inativo: {
+    light: { stroke: "#71717a", fill: "rgba(113, 113, 122, 0.08)" },
+    dark: { stroke: "#a1a1aa", fill: "rgba(161, 161, 170, 0.15)" },
+  },
+} as const;
+
+export const RELATIONSHIP_NODE_COLORS: Record<
+  RelationshipNodeRole,
+  {
+    label: string;
+    light: { fill: string; stroke: string; text: string };
+    dark: { fill: string; stroke: string; text: string };
+    dotClass: string;
+    avatarClass: string;
+  }
+> = {
+  presbyter: {
+    label: "Presbítero",
+    light: { fill: "#5b21b6", stroke: "#4c1d95", text: "#ffffff" },
+    dark: { fill: "#a78bfa", stroke: "#ddd6fe", text: "#09090b" },
+    dotClass: "bg-violet-700 dark:bg-violet-400",
+    avatarClass:
+      "bg-violet-700 text-white dark:bg-violet-400 dark:text-zinc-950",
+  },
+  deacon: {
+    label: "Diácono",
+    light: { fill: "#b45309", stroke: "#78350f", text: "#ffffff" },
+    dark: { fill: "#fbbf24", stroke: "#fde68a", text: "#09090b" },
+    dotClass: "bg-amber-700 dark:bg-amber-400",
+    avatarClass: "bg-amber-700 text-white dark:bg-amber-400 dark:text-zinc-950",
+  },
+  leader: {
+    label: "Discipulador de GC",
+    light: { fill: "#15803d", stroke: "#14532d", text: "#ffffff" },
+    dark: { fill: "#4ade80", stroke: "#bbf7d0", text: "#09090b" },
+    dotClass: "bg-green-700 dark:bg-green-400",
+    avatarClass: "bg-green-700 text-white dark:bg-green-400 dark:text-zinc-950",
+  },
+  discipler: {
+    label: "Discipulador",
+    light: { fill: "#0369a1", stroke: "#0c4a6e", text: "#ffffff" },
+    dark: { fill: "#38bdf8", stroke: "#bae6fd", text: "#09090b" },
+    dotClass: "bg-sky-700 dark:bg-sky-400",
+    avatarClass: "bg-sky-700 text-white dark:bg-sky-400 dark:text-zinc-950",
+  },
+  disciple: {
+    label: "Discípulo",
+    light: { fill: "#f4f4f5", stroke: "#71717a", text: "#18181b" },
+    dark: { fill: "#27272a", stroke: "#a1a1aa", text: "#fafafa" },
+    dotClass: "bg-zinc-400 dark:bg-zinc-500",
+    avatarClass:
+      "bg-zinc-200 text-zinc-900 border border-zinc-400 dark:bg-zinc-800 dark:text-zinc-50 dark:border-zinc-600",
+  },
+  child: {
+    label: "Criança",
+    light: { fill: "#e0f2fe", stroke: "#0284c7", text: "#0c4a6e" },
+    dark: { fill: "#082f49", stroke: "#38bdf8", text: "#e0f2fe" },
+    dotClass: "bg-sky-300 dark:bg-sky-800",
+    avatarClass:
+      "bg-sky-100 text-sky-900 border border-sky-400 dark:bg-sky-950 dark:text-sky-100 dark:border-sky-700",
+  },
+} as const;
+
+export const GRAPH_UI_CLASSES = {
+  layerToggleDisciplerActive:
+    "border-emerald-600/40 bg-emerald-500/15 text-emerald-800 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300",
+  layerToggleFellowshipActive:
+    "border-violet-600/40 bg-violet-500/15 text-violet-800 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-300",
+  layerToggleMarriageActive:
+    "border-pink-600/40 bg-pink-500/15 text-pink-800 dark:border-pink-400/40 dark:bg-pink-500/15 dark:text-pink-300",
+  layerToggleChildActive:
+    "border-sky-600/40 bg-sky-500/15 text-sky-800 dark:border-sky-400/40 dark:bg-sky-500/15 dark:text-sky-300",
+  layerTogglePotentialActive:
+    "border-primary bg-primary/15 text-primary",
+  layerToggleInactive:
+    "border-border bg-muted/30 text-muted-foreground hover:text-foreground",
+  legendLineDiscipler: "bg-emerald-600 dark:bg-emerald-400",
+  legendLineFellowship:
+    "border-t-2 border-dashed border-violet-600 dark:border-violet-400",
+  legendLineMarriage:
+    "border-t-2 border-dotted border-pink-600 dark:border-pink-400",
+  kpiWarningActive: "border-amber-500 bg-amber-500/10",
+  kpiWarningIcon: "text-amber-600 dark:text-amber-400",
+  inspectorWarningBox:
+    "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+} as const;
+
+export const GRAPH_LINK_COLORS = {
+  default: { light: "#94a3b8", dark: "#52525b" },
+  active: { light: "#6366f1", dark: "#818cf8" },
+  arrow: { light: "#64748b", dark: "#71717a" },
+  discipler: {
+    default: { light: "#94a3b8", dark: "#52525b" },
+    highlighted: { light: "#15803d", dark: "#4ade80" },
+  },
+  fellowship: {
+    default: { light: "#a78bfa", dark: "#7c3aed" },
+    highlighted: { light: "#6d28d9", dark: "#c084fc" },
+  },
+  marriage: {
+    default: { light: "#f472b6", dark: "#be185d" },
+    highlighted: { light: "#db2777", dark: "#f472b6" },
+  },
+  parent: {
+    default: { light: "#cbd5e1", dark: "#3f3f46" },
+    highlighted: { light: "#0369a1", dark: "#38bdf8" },
+  },
+} as const;
+
+export const GRAPH_CANVAS_COLORS = {
+  background: { light: "#fafafa", dark: "#09090b" },
+  gridDot: {
+    light: "rgba(161, 161, 170, 0.25)",
+    dark: "rgba(82, 82, 91, 0.3)",
+  },
+  clusterFill: {
+    light: "rgba(244, 244, 245, 0.7)",
+    dark: "rgba(24, 24, 27, 0.7)",
+  },
+  clusterStroke: { light: "#d4d4d8", dark: "#27272a" },
+  clusterHeaderBg: {
+    light: "rgba(255, 255, 255, 0.92)",
+    dark: "rgba(24, 24, 27, 0.92)",
+  },
+  clusterTitle: { light: "#18181b", dark: "#f4f4f5" },
+  clusterSubtitle: { light: "#52525b", dark: "#a1a1aa" },
+  warningZoneFill: {
+    light: "rgba(217, 119, 6, 0.06)",
+    dark: "rgba(245, 158, 11, 0.08)",
+  },
+  warningZoneStroke: {
+    light: "rgba(217, 119, 6, 0.4)",
+    dark: "rgba(245, 158, 11, 0.45)",
+  },
+  labelBg: {
+    light: "rgba(255, 255, 255, 0.92)",
+    dark: "rgba(9, 9, 11, 0.9)",
+  },
+  labelBorder: {
+    light: "rgba(212, 212, 216, 0.8)",
+    dark: "rgba(63, 63, 70, 0.8)",
+  },
+  labelBgSelected: { light: "#18181b", dark: "#fafafa" },
+  labelText: { light: "#18181b", dark: "#f4f4f5" },
+  labelTextSelected: { light: "#fafafa", dark: "#09090b" },
+  selectionRing: { light: "#2563eb", dark: "#60a5fa" },
+  searchMatchRing: { light: "#d97706", dark: "#fbbf24" },
+  alertNoDiscipler: { light: "#dc2626", dark: "#f87171" },
+  alertNoFellowship: { light: "#d97706", dark: "#fbbf24" },
+  countBadgeBg: { light: "#18181b", dark: "#f4f4f5" },
+  countBadgeText: { light: "#fafafa", dark: "#09090b" },
+} as const;
+
+export const GRAPH_COLORS = {
+  ...GRAPH_NODE_COLORS,
+  nodes: RELATIONSHIP_NODE_COLORS,
+  link: GRAPH_LINK_COLORS,
+  canvas: GRAPH_CANVAS_COLORS,
+  ui: GRAPH_UI_CLASSES,
+} as const;
+
+// ==========================================
+// 6. CLASSES TAILWIND PADRONIZADAS (Reutilização de UI)
+// ==========================================
+export const THEME_CLASSES = {
+  // Fundo geral da página
+  background: "bg-zinc-50 dark:bg-zinc-950",
+
+  // Superfícies e Containers
+  surface: "bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800",
+  card: "bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-xl shadow-sm",
+  cardHover: "hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors",
+
+  // Textos
+  title: "text-zinc-900 dark:text-zinc-50 font-bold",
+  subtitle: "text-zinc-700 dark:text-zinc-300",
+  body: "text-zinc-600 dark:text-zinc-400 text-sm",
+  muted: "text-zinc-500 dark:text-zinc-500 text-xs",
+
+  // Ações Primárias (Botões)
+  buttonPrimary:
+    "bg-zinc-900 text-zinc-50 hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200 rounded-md transition-colors",
+  buttonSecondary:
+    "bg-zinc-100 text-zinc-900 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 rounded-md transition-colors",
+  buttonOutline:
+    "border border-zinc-200 bg-transparent text-zinc-900 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors",
+
+  // Inputs e Formulários
+  input:
+    "border-zinc-200 bg-white text-zinc-900 focus:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-600 rounded-md",
+
+  // Badges e Tags
+  badgeNeutral:
+    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-500/10 text-zinc-600 border border-zinc-500/20 dark:bg-zinc-400/10 dark:text-zinc-400 dark:border-zinc-400/20",
+  badgePrimary:
+    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20",
+  badgeSuccess:
+    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600 border border-green-500/20 dark:text-green-400",
+  badgeWarning:
+    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20 dark:text-amber-400",
+  badgeDestructive:
+    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 border border-red-500/20 dark:text-red-400",
+  badgeRegistrationConfirmed:
+    "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 dark:text-emerald-400",
+  badgeRegistrationPresent:
+    "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide bg-blue-500/15 text-blue-700 border border-blue-500/30 dark:text-blue-400",
+  badgeRegistrationCancelled:
+    "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide bg-red-500/15 text-red-700 border border-red-500/30 dark:text-red-400",
+  badgeInfo:
+    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 border border-blue-500/20 dark:text-blue-400",
+  badgePriority:
+    "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-700 border border-purple-500/25 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30",
+} as const;
+
+export const WAITLIST_STATUS_CONFIG = {
+  aguardando: {
+    label: "Aguardando",
+    className: THEME_CLASSES.badgeWarning,
+    color: STATUS_COLORS.warning,
+  },
+  chamado: {
+    label: "Chamado",
+    className: THEME_CLASSES.badgeInfo,
+    color: STATUS_COLORS.info,
+  },
+  inscrito: {
+    label: "Inscrito",
+    className: THEME_CLASSES.badgeSuccess,
+    color: STATUS_COLORS.success,
+  },
+  desistiu: {
+    label: "Desistiu",
+    className: THEME_CLASSES.badgeNeutral,
+    color: {
+      light: PALETTE.zinc[500],
+      dark: PALETTE.zinc[400],
+    },
+  },
+} as const;
+
+// ==========================================
+// 7. PALETA DE CORES PARA EQUIPES DE SERVIÇO (Voluntariado / Diaconato)
+// ==========================================
+export type ServiceTeamId =
+  | "cozinha"
+  | "limpeza"
+  | "recepcao"
+  | "multimidia"
+  | "criancas"
+  | "intercessao"
+  | "apoio"
+  | "geral";
+
+export const SERVICE_TEAM_COLORS: Record<
+  ServiceTeamId,
+  {
+    light: string;
+    dark: string;
+    bgLight: string;
+    bgDark: string;
+    borderLight: string;
+    borderDark: string;
+    badgeClass: string;
+  }
+> = {
+  cozinha: {
+    light: "#b45309",
+    dark: "#fbbf24",
+    bgLight: "rgba(180, 83, 9, 0.1)",
+    bgDark: "rgba(251, 191, 36, 0.15)",
+    borderLight: "rgba(180, 83, 9, 0.25)",
+    borderDark: "rgba(251, 191, 36, 0.3)",
+    badgeClass:
+      "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
+  },
+  limpeza: {
+    light: "#0f766e",
+    dark: "#2dd4bf",
+    bgLight: "rgba(15, 118, 110, 0.1)",
+    bgDark: "rgba(45, 212, 191, 0.15)",
+    borderLight: "rgba(15, 118, 110, 0.25)",
+    borderDark: "rgba(45, 212, 191, 0.3)",
+    badgeClass:
+      "bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/30",
+  },
+  recepcao: {
+    light: "#be123c",
+    dark: "#fb7185",
+    bgLight: "rgba(190, 18, 60, 0.1)",
+    bgDark: "rgba(251, 113, 133, 0.15)",
+    borderLight: "rgba(190, 18, 60, 0.25)",
+    borderDark: "rgba(251, 113, 133, 0.3)",
+    badgeClass:
+      "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30",
+  },
+  multimidia: {
+    light: "#6d28d9",
+    dark: "#c084fc",
+    bgLight: "rgba(109, 40, 217, 0.1)",
+    bgDark: "rgba(192, 132, 252, 0.15)",
+    borderLight: "rgba(109, 40, 217, 0.25)",
+    borderDark: "rgba(192, 132, 252, 0.3)",
+    badgeClass:
+      "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30",
+  },
+  criancas: {
+    light: "#0369a1",
+    dark: "#38bdf8",
+    bgLight: "rgba(3, 105, 161, 0.1)",
+    bgDark: "rgba(56, 189, 248, 0.15)",
+    borderLight: "rgba(3, 105, 161, 0.25)",
+    borderDark: "rgba(56, 189, 248, 0.3)",
+    badgeClass:
+      "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/30",
+  },
+  intercessao: {
+    light: "#b91c1c",
+    dark: "#f87171",
+    bgLight: "rgba(185, 28, 28, 0.1)",
+    bgDark: "rgba(248, 113, 113, 0.15)",
+    borderLight: "rgba(185, 28, 28, 0.25)",
+    borderDark: "rgba(248, 113, 113, 0.3)",
+    badgeClass:
+      "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30",
+  },
+  apoio: {
+    light: "#4338ca",
+    dark: "#818cf8",
+    bgLight: "rgba(67, 56, 202, 0.1)",
+    bgDark: "rgba(129, 140, 248, 0.15)",
+    borderLight: "rgba(67, 56, 202, 0.25)",
+    borderDark: "rgba(129, 140, 248, 0.3)",
+    badgeClass:
+      "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30",
+  },
+  geral: {
+    light: "#15803d",
+    dark: "#4ade80",
+    bgLight: "rgba(21, 128, 61, 0.1)",
+    bgDark: "rgba(74, 222, 128, 0.15)",
+    borderLight: "rgba(21, 128, 61, 0.25)",
+    borderDark: "rgba(74, 222, 128, 0.3)",
+    badgeClass:
+      "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
+  },
+};
+
+// ==========================================
+// 8. TOKENS DO SWITCH DE TEMA (Day / Night Theme Switch)
+// ==========================================
+export const THEME_SWITCH_COLORS = {
+  light: {
+    trackBg: "rgba(244, 239, 230, 0.6)", // muted/60 (integrado ao fundo da página)
+    trackBorder: "rgba(229, 231, 235, 0.8)", // border/80
+    thumbBg: "#ffffff",
+    thumbBorder: "rgba(229, 231, 235, 0.7)", // border/70
+    sunIcon: "#d97706", // amber-600
+    cloudColor: "rgba(113, 113, 122, 0.35)", // zinc-500/35
+  },
+  dark: {
+    trackBg: "rgba(24, 24, 27, 0.85)", // zinc-900/85 (integrado ao card da sidebar)
+    trackBorder: "rgba(63, 63, 70, 0.8)", // zinc-700/80
+    thumbBg: "#27272a", // zinc-800
+    thumbBorder: "#3f3f46", // zinc-700
+    moonIcon: "#fbbf24", // amber-400 (AAA contrast on dark)
+    starColor: "rgba(254, 240, 138, 0.6)", // yellow-200/60
+  },
+} as const;
+
+// ==========================================
+// 9. TOKENS DE BARRAS DE ROLAGEM (Scrollbars)
+// ==========================================
+export const SCROLLBAR_COLORS = {
+  light: {
+    track: "transparent",
+    thumb: "rgba(24, 24, 27, 0.18)", // zinc-900 / 18%
+    thumbHover: "rgba(24, 24, 27, 0.35)", // zinc-900 / 35%
+    thumbActive: "rgba(24, 24, 27, 0.5)", // zinc-900 / 50%
+    primaryThumb: "rgba(27, 67, 50, 0.35)", // primary olive / 35%
+    primaryThumbHover: "rgba(27, 67, 50, 0.65)", // primary olive / 65%
+  },
+  dark: {
+    track: "transparent",
+    thumb: "rgba(250, 250, 250, 0.18)", // zinc-50 / 18%
+    thumbHover: "rgba(250, 250, 250, 0.35)", // zinc-50 / 35%
+    thumbActive: "rgba(250, 250, 250, 0.5)", // zinc-50 / 50%
+    primaryThumb: "rgba(134, 239, 172, 0.35)", // primary mint / 35%
+    primaryThumbHover: "rgba(134, 239, 172, 0.65)", // primary mint / 65%
+  },
+} as const;
+
+// ==========================================
+// 10. FUNÇÕES AUXILIARES DE CORES
+// ==========================================
+/**
+ * Retorna os tokens semânticos baseados no modo dark atual.
+ */
+export function getThemeTokens(isDark: boolean) {
+  return isDark ? THEME_TOKENS.dark : THEME_TOKENS.light;
+}
+
+/**
+ * Retorna as cores de estilo para nós do grafo de relacionamentos.
+ */
+export function getGraphNodeColors(role: GraphNodeRole, isDark: boolean) {
+  const roleConfig = GRAPH_NODE_COLORS[role] ?? GRAPH_NODE_COLORS.inativo;
+  return isDark ? roleConfig.dark : roleConfig.light;
+}
+
+/**
+ * Retorna a configuração de cor e badge para uma equipe de serviço.
+ */
+export function getServiceTeamColorConfig(teamId?: string | null) {
+  if (!teamId) return null;
+  const normalized = teamId.toLowerCase().trim() as ServiceTeamId;
+  return SERVICE_TEAM_COLORS[normalized] ?? null;
+}
+

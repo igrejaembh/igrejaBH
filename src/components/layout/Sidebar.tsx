@@ -1,9 +1,16 @@
 import { Link, useLocation } from "react-router-dom"
-import { LogOutIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import {
+  LogOutIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  Sun,
+  Moon,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import supabase from "@/lib/supabase"
 import { useEffect, useState } from "react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { ChurchAvatar } from "@/components/ui/church-avatar"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -12,19 +19,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { navItems } from "./NavItems"
-
-interface UserProfile {
-  id: string
-  full_name: string
-  avatar_url?: string
-}
+import { useTheme } from "@/components/theme-provider"
+import { ThemeSwitch } from "@/components/ThemeSwitch"
+import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile"
 
 export function Sidebar() {
   const location = useLocation()
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [isManagement, setIsManagement] = useState(false)
-  const [canPost, setCanPost] = useState(false)
-  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const { resolvedTheme, setTheme } = useTheme()
+  const { profile, isAdmin, isManagement, canPost, loading } = useCurrentUserProfile()
+
+  const isDark = resolvedTheme === "dark"
+
+  const toggleTheme = () => {
+    setTheme(isDark ? "light" : "dark")
+  }
+
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem("sidebar-collapsed")
     return saved ? JSON.parse(saved) : false
@@ -34,61 +43,9 @@ export function Sidebar() {
     localStorage.setItem("sidebar-collapsed", JSON.stringify(isCollapsed))
   }, [isCollapsed])
 
-  useEffect(() => {
-    async function fetchUserData() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (session?.user) {
-        const { data: profileData } = await supabase
-          .from("profiles")
-          .select(
-            "id, full_name, avatar_url, is_dev, is_presbyter, is_deacon, can_post"
-          )
-          .eq("user_id", session.user.id)
-          .single()
-
-        if (profileData) {
-          setProfile({
-            id: profileData.id,
-            full_name: profileData.full_name,
-            avatar_url: profileData.avatar_url || undefined,
-          })
-          setIsAdmin(!!(profileData.is_dev || profileData.is_presbyter))
-          setCanPost(
-            !!(
-              profileData.is_dev ||
-              profileData.is_presbyter ||
-              profileData.can_post
-            )
-          )
-
-          const { count } = await supabase
-            .from("home_groups")
-            .select("*", { count: "exact", head: true })
-            .or(
-              `leader_1_id.eq.${profileData.id},leader_2_id.eq.${profileData.id}`
-            )
-
-          setIsManagement(
-            !!(
-              profileData.is_dev ||
-              profileData.is_presbyter ||
-              profileData.is_deacon ||
-              (count || 0) > 0
-            )
-          )
-        }
-      }
-    }
-    fetchUserData()
-  }, [])
-
   const filteredNavItems = navItems.filter((item) => {
-    // @ts-ignore
     if (item.requireAdmin && !isAdmin) return false
     if (item.requireManagement && !isManagement) return false
-    // @ts-ignore
     if (item.requireCanPost && !canPost) return false
     return true
   })
@@ -124,30 +81,28 @@ export function Sidebar() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Link
-                to="/"
+                to="/dashboard"
                 className={cn(
-                  "flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-primary/20 bg-primary/10 transition-all duration-300",
-                  !isCollapsed && "mr-3"
+                  "flex items-center gap-3 transition-opacity hover:opacity-90",
+                  isCollapsed && "justify-center"
                 )}
               >
-                <img
-                  src="/logo_igreja.png"
-                  alt="Logo"
-                  className="h-full w-full object-contain p-1"
-                />
+                <ChurchAvatar size="md" variant="subtle" />
+                {!isCollapsed && (
+                  <div className="flex flex-col min-w-0">
+                    <span className="truncate text-base font-bold tracking-tight text-foreground leading-none">
+                      Igreja em BH
+                    </span>
+                  </div>
+                )}
               </Link>
             </TooltipTrigger>
             {isCollapsed && (
               <TooltipContent side="right" sideOffset={10}>
-                Igreja BH
+                Igreja em BH
               </TooltipContent>
             )}
           </Tooltip>
-          {!isCollapsed && (
-            <h1 className="truncate text-lg font-bold tracking-tight text-foreground">
-              Igreja BH
-            </h1>
-          )}
 
           <Button
             variant="ghost"
@@ -177,7 +132,7 @@ export function Sidebar() {
                 key={item.name}
                 to={item.href}
                 className={cn(
-                  "flex items-center rounded-xl text-sm font-medium transition-all duration-200",
+                  "flex items-center rounded-xl text-sm font-medium transition-all duration-200 ease-out active:scale-[0.98] motion-reduce:active:scale-100",
                   isCollapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5",
                   isActive
                     ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
@@ -204,24 +159,84 @@ export function Sidebar() {
 
         <div
           className={cn(
-            "mt-auto space-y-4 border-t border-border p-4",
+            "mt-auto space-y-3 border-t border-border p-4",
             isCollapsed ? "flex flex-col items-center" : ""
           )}
         >
-          {profile &&
+          {/* Alternância de tema (Claro / Escuro): Ícone no modo recolhido, Switch ampliado no modo aberto */}
+          {isCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  data-theme-transition
+                  onClick={toggleTheme}
+                  aria-label={
+                    isDark ? "Mudar para modo claro" : "Mudar para modo escuro"
+                  }
+                  className="group relative flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted-foreground transition-all duration-200 hover:bg-primary/10 hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <div className="relative flex size-5 items-center justify-center">
+                    <Sun
+                      className={cn(
+                        "size-5 text-amber-600 transition-all duration-500 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-reduce:transition-none motion-reduce:transform-none",
+                        isDark
+                          ? "scale-0 -rotate-90 opacity-0"
+                          : "scale-100 rotate-0 opacity-100"
+                      )}
+                    />
+                    <Moon
+                      className={cn(
+                        "absolute size-5 text-amber-400 transition-all duration-500 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-reduce:transition-none motion-reduce:transform-none",
+                        isDark
+                          ? "scale-100 rotate-0 opacity-100"
+                          : "scale-0 rotate-90 opacity-0"
+                      )}
+                    />
+                  </div>
+                  <span className="sr-only">
+                    {isDark ? "Mudar para modo claro" : "Mudar para modo escuro"}
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={10}>
+                {isDark ? "Mudar para modo claro" : "Mudar para modo escuro"}
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <div className="flex w-full min-h-[44px] items-center justify-center py-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ThemeSwitch
+                    size="lg"
+                    checked={isDark}
+                    onCheckedChange={toggleTheme}
+                    aria-label={
+                      isDark ? "Mudar para modo claro" : "Mudar para modo escuro"
+                    }
+                  />
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={10}>
+                  {isDark ? "Mudar para modo claro" : "Mudar para modo escuro"}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+
+          {profile ? (
             (() => {
               const content = (
                 <Link
                   to="/perfil"
                   className={cn(
-                    "flex w-full items-center rounded-xl transition-all hover:bg-primary/10",
+                    "flex w-full min-h-[44px] items-center rounded-xl transition-all hover:bg-primary/10",
                     isCollapsed ? "justify-center p-2" : "gap-3 p-2",
                     location.pathname === "/perfil" &&
                       "border border-primary/20 bg-primary/10"
                   )}
                 >
                   <Avatar className="size-9 shrink-0 border border-border shadow-sm">
-                    <AvatarImage src={profile.avatar_url} />
+                    <AvatarImage src={profile.avatar_url || undefined} />
                     <AvatarFallback className="bg-primary/20 text-xs font-bold text-primary">
                       {getInitials(profile.full_name)}
                     </AvatarFallback>
@@ -249,14 +264,30 @@ export function Sidebar() {
                   </TooltipContent>
                 </Tooltip>
               )
-            })()}
+            })()
+          ) : loading ? (
+            <div
+              className={cn(
+                "flex w-full min-h-[44px] items-center rounded-xl p-2",
+                isCollapsed ? "justify-center" : "gap-3"
+              )}
+            >
+              <div className="size-9 shrink-0 rounded-full bg-muted/70 animate-pulse" />
+              {!isCollapsed && (
+                <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                  <div className="h-3.5 w-24 rounded bg-muted/70 animate-pulse" />
+                  <div className="h-2.5 w-14 rounded bg-muted/40 animate-pulse" />
+                </div>
+              )}
+            </div>
+          ) : null}
 
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 onClick={handleLogout}
                 className={cn(
-                  "flex w-full items-center rounded-xl text-sm font-bold text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive",
+                  "flex w-full min-h-[44px] items-center rounded-xl text-sm font-bold text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive cursor-pointer",
                   isCollapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
                 )}
               >

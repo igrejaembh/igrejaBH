@@ -154,7 +154,7 @@ export default function AddHomeGroup() {
         setLeaders(formattedUsers || []);
       } catch (error) {
         console.error("Error fetching leaders:", error);
-        toast.error("Erro ao carregar lista de membros.");
+        toast.error("Erro ao carregar lista de discípulos.");
       } finally {
         setLoadingLeaders(false);
       }
@@ -281,7 +281,7 @@ export default function AddHomeGroup() {
     toast.promise(operation(), {
       loading: "Salvando grupo caseiro...",
       success: () => {
-        navigate("/");
+        navigate("/dashboard");
         return "Grupo caseiro adicionado com sucesso!";
       },
       error: "Erro ao salvar grupo caseiro.",
@@ -408,7 +408,7 @@ export default function AddHomeGroup() {
                 />
 
                 <Dialog open={isSectorDialogOpen} onOpenChange={setIsSectorDialogOpen}>
-                  <DialogContent className="sm:max-w-md">
+                  <DialogContent size="md">
                     <DialogHeader>
                       <DialogTitle className="text-base font-bold">Gerenciar Setores</DialogTitle>
                       <DialogDescription className="text-xs">
@@ -441,7 +441,7 @@ export default function AddHomeGroup() {
                       ) : sectors.length === 0 ? (
                         <p className="text-xs text-muted-foreground py-2 italic text-center">Nenhum setor cadastrado ainda.</p>
                       ) : (
-                        <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                        <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
                           {sectors.map((sec) => (
                             <div key={sec.id} className="flex items-center justify-between p-2 rounded-lg bg-zinc-50 dark:bg-zinc-900 border border-border/30 hover:border-border/60 transition-colors">
                               <span className="text-xs font-medium text-foreground">{sec.name}</span>
@@ -535,7 +535,7 @@ export default function AddHomeGroup() {
                               </ComboboxItem>
                             ))}
                           </ComboboxList>
-                          <ComboboxEmpty>Nenhum membro encontrado.</ComboboxEmpty>
+                          <ComboboxEmpty>Nenhum discípulo encontrado.</ComboboxEmpty>
                         </ComboboxContent>
                       </Combobox>
                       <FieldError errors={[fieldState.error]} />
@@ -567,7 +567,7 @@ export default function AddHomeGroup() {
                               </ComboboxItem>
                             ))}
                           </ComboboxList>
-                          <ComboboxEmpty>Nenhum membro encontrado.</ComboboxEmpty>
+                          <ComboboxEmpty>Nenhum discípulo encontrado.</ComboboxEmpty>
                         </ComboboxContent>
                       </Combobox>
                       <FieldError errors={[fieldState.error]} />

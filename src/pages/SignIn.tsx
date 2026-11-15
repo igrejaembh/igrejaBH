@@ -21,16 +21,21 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import { EyeIcon, EyeOffIcon, LockIcon, MailIcon, Loader2 } from "lucide-react"
+import { EyeIcon, EyeOffIcon, LockIcon, MailIcon, Loader2, ArrowLeft } from "lucide-react"
 import { useState } from "react"
 import supabase from "@/lib/supabase"
-import { Link, useNavigate } from "react-router-dom"
+import { isRestrictedGroupMode } from "@/lib/restrictedMode"
+import { Link, useNavigate, useLocation } from "react-router-dom"
 import { toast } from "sonner"
 
 export default function SignIn() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  const fromLocation = (location.state as { from?: { pathname?: string; search?: string } })?.from
+  const isRestricted = isRestrictedGroupMode() || fromLocation?.pathname === "/meu-grupo"
 
   const signForm = useForm<SignInValue>({
     resolver: zodResolver(signInSchema),
@@ -46,7 +51,7 @@ export default function SignIn() {
     toast.promise(
       supabase.auth
         .signInWithPassword({
-          email: data.email,
+          email: data.email.trim(),
           password: data.password,
         })
         .then(({ error, data: authData }) => {
@@ -56,7 +61,10 @@ export default function SignIn() {
       {
         loading: "Realizando login...",
         success: () => {
-          navigate("/")
+          const target = isRestricted
+            ? `${fromLocation?.pathname || "/meu-grupo"}${fromLocation?.search || ""}`
+            : fromLocation?.pathname || "/dashboard"
+          navigate(target, { replace: true })
           return "Login realizado com sucesso!"
         },
         error: (error) => {
@@ -88,16 +96,53 @@ export default function SignIn() {
 
       <Card className="w-full max-w-md border-border bg-card/50 shadow-2xl backdrop-blur-xl">
         <CardHeader className="space-y-1 text-center">
-          <div className="mb-4 flex justify-center">
-            <div className="rounded-2xl border border-primary/20 bg-primary/10 p-3 shadow-inner">
-              <LockIcon className="h-8 w-8 text-primary" />
+          {!isRestricted && (
+            <div className="flex items-center justify-start pb-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="min-h-[44px] -ml-2 text-muted-foreground hover:text-foreground gap-1.5"
+              >
+                <Link to="/">
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Voltar ao início</span>
+                </Link>
+              </Button>
             </div>
+          )}
+          <div className="mb-4 flex justify-center">
+            {isRestricted ? (
+              <div
+                className="rounded-2xl border border-primary/20 bg-primary/10 p-3 shadow-inner"
+                title="Gestão do Grupo Caseiro"
+              >
+                <LockIcon className="h-8 w-8 text-primary" />
+              </div>
+            ) : (
+              <Link
+                to="/"
+                className="group rounded-2xl border border-primary/20 bg-primary/10 p-3 shadow-inner transition-colors hover:bg-primary/20 focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+                title="Voltar para a página inicial"
+                aria-label="Voltar para a página inicial"
+              >
+                <LockIcon className="h-8 w-8 text-primary" />
+              </Link>
+            )}
           </div>
           <CardTitle className="text-3xl font-bold tracking-tight text-foreground">
-            Igreja em BH
+            {isRestricted ? (
+              <span>Igreja em Belo Horizonte</span>
+            ) : (
+              <Link to="/" className="transition-opacity hover:opacity-85">
+                Igreja em Belo Horizonte
+              </Link>
+            )}
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            Entre com suas credenciais para acessar o portal
+            {isRestricted
+              ? "Entre com suas credenciais para acessar a gestão do seu Grupo Caseiro"
+              : "Entre com suas credenciais para acessar o portal"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -167,7 +212,7 @@ export default function SignIn() {
                           variant="ghost"
                           size="icon"
                           type="button"
-                          className="text-muted-foreground hover:bg-transparent hover:text-foreground"
+                          className="min-h-[44px] min-w-[44px] text-muted-foreground hover:bg-transparent hover:text-foreground"
                           onClick={() => setShowPassword(!showPassword)}
                         >
                           {showPassword ? (
@@ -207,15 +252,17 @@ export default function SignIn() {
             )}
           </Button>
 
-          <p className="text-center text-sm text-muted-foreground">
-            Ainda não tem uma conta?{" "}
-            <Link
-              to="/cadastro"
-              className="font-medium text-primary transition-colors hover:text-primary/80"
-            >
-              Cadastre-se agora
-            </Link>
-          </p>
+          {!isRestricted && (
+            <p className="text-center text-sm text-muted-foreground">
+              Ainda não tem uma conta?{" "}
+              <Link
+                to="/cadastro"
+                className="font-medium text-primary transition-colors hover:text-primary/80"
+              >
+                Criar conta
+              </Link>
+            </p>
+          )}
         </CardFooter>
       </Card>
     </div>

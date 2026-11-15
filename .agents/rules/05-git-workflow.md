@@ -27,3 +27,10 @@ O projeto possui fluxos de trabalho configurados no `.github/workflows/`.
 ## 4. Deploy de Banco de Dados
 - O arquivo `deploy-migrations.yml` cuida das atualizações em produção quando ocorre o merge na branch principal.
 - Se o agente alterar funções, tabelas ou políticas RLS, ele deve criar UMA MIGRAÇÃO, e não alterar diretamente pelo painel do Supabase, para que o GitHub Actions possa aplicar a mudança via código de forma segura.
+
+## 5. Preparação de Worktrees e Limpeza Pós-PR
+- **Prontidão do Ambiente de Teste (Worktrees):** Ao criar ou trabalhar em uma *worktree* do Git, o agente DEVE OBRIGATORIAMENTE garantir que a pasta esteja 100% pronta para execução e teste:
+  1. **Configurações (`.env`):** Copiar os dados e variáveis de ambiente do arquivo `.env` (e `.env.local`, se aplicável) do repositório principal/raiz para a nova worktree.
+  2. **Dependências (`node_modules`):** Verificar se a pasta `node_modules` existe na worktree. Se não existir ou estiver desatualizada, o agente deve garantir a existência executando a instalação de dependências ou ajustando o ambiente para que o usuário/agente possa rodar e testar a aplicação imediatamente.
+- **Limpeza Pós-PR:** Sempre delete a *worktree* e/ou a *branch* correspondente após a conclusão/merge do Pull Request, tanto localmente quanto na `origin` (repositório remoto).
+  - *Exceção:* Isso não se aplica à branch `dev`. A branch `dev` **nunca** deve ser deletada.

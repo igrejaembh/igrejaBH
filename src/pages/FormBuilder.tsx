@@ -29,13 +29,16 @@ import {
   Radio,
   Calendar,
   Layers,
-  Download,
   Upload,
   Share2,
   GripVertical,
   AlertTriangle,
   Users,
+
+  Bell,
 } from "lucide-react"
+import { FormPresentationEditor } from "@/components/forms/FormPresentationEditor"
+import { parseEndOfDay } from "@/lib/utils"
 import {
   Card,
   CardContent,
@@ -96,6 +99,7 @@ const mapDbFormToTemplate = (dbForm: any): FormTemplate => {
     createdAt: dbForm.created_at,
     isPublic: dbForm.is_public,
     isActive: dbForm.is_active,
+    presentationPage: dbForm.presentation_page || undefined,
   }
 }
 
@@ -106,6 +110,7 @@ const mapDbSubmission = (dbSub: any): FormSubmission => {
     id: dbSub.id,
     formId: dbSub.form_id,
     submittedAt: dbSub.submitted_at,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     data: dbSub.data as Record<string, any>,
   }
 }
@@ -119,7 +124,7 @@ export default function FormBuilder() {
     Record<string, FormSubmission[]>
   >({})
   const [loading, setLoading] = useState(true)
-  const [retreats, setRetreats] = useState<{ id: string; title: string; status: string | null; form_id: string | null; end_date: string | null; max_participants: number | null; registration_deadline: string | null }[]>([])
+  const [retreats, setRetreats] = useState<{ id: string; title: string; status: string | null; form_id: string | null; start_date?: string | null; end_date: string | null; location_text?: string | null; price?: number | null; has_payment?: boolean | null; max_participants: number | null; registration_deadline: string | null }[]>([])
 
   // Navigation and active view states
   const [currentView, setCurrentView] = useState<"list" | "builder">("list")
@@ -127,13 +132,15 @@ export default function FormBuilder() {
 
   // Builder panel states
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null)
-  const [builderTab, setBuilderTab] = useState<"edit" | "preview" | "json">(
-    "edit"
-  )
+  const [builderTab, setBuilderTab] = useState<
+    "edit" | "presentation" | "preview"
+  >("edit")
   const [newOptionTexts, setNewOptionTexts] = useState<Record<string, string>>(
     {}
   )
   const [showPreview, setShowPreview] = useState(true)
+  const [postAnnouncement, setPostAnnouncement] = useState(false)
+  const [announcementText, setAnnouncementText] = useState("")
 
   const isFormConnectedToEvent = selectedForm
     ? retreats.some((r) => r.form_id === selectedForm.id)
@@ -180,7 +187,7 @@ export default function FormBuilder() {
         // Fetch retreats to correlate forms
         const { data: dbRetreats, error: retreatsError } = await supabase
           .from("retreats")
-          .select("id, title, status, form_id, end_date, max_participants, registration_deadline")
+          .select("id, title, status, form_id, start_date, end_date, location_text, price, has_payment, max_participants, registration_deadline")
 
         if (retreatsError) {
           console.error("Error loading retreats in FormBuilder:", retreatsError)
@@ -244,7 +251,11 @@ export default function FormBuilder() {
   >({})
 
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
@@ -286,6 +297,8 @@ export default function FormBuilder() {
     setBuilderTab("edit")
     setPreviewFormData({})
     setPreviewFormErrors({})
+    setPostAnnouncement(false)
+    setAnnouncementText("")
   }
 
   // Edit existing form
@@ -297,6 +310,8 @@ export default function FormBuilder() {
     setEditingFieldId(form.fields.length > 0 ? form.fields[0].id : null)
     setPreviewFormData({})
     setPreviewFormErrors({})
+    setPostAnnouncement(false)
+    setAnnouncementText("")
   }
 
   // Save the form template
@@ -350,12 +365,34 @@ export default function FormBuilder() {
         name: selectedForm.name,
         description: selectedForm.description || null,
         fields: selectedForm.fields as any,
+        presentation_page: (selectedForm.presentationPage as any) || null,
         is_public: !!selectedForm.isPublic,
         created_by: session?.user?.id || null,
       })
 
       if (error) throw error
       toast.dismiss(savingToastId)
+
+      // Se o usuário optou por publicar aviso no Mural da Igreja
+      if (postAnnouncement) {
+        const content = announcementText.trim()
+          ? announcementText.trim()
+          : (selectedForm.description?.trim() || `Novo formulário disponível para resposta: "${selectedForm.name}".`);
+
+        const { error: postErr } = await supabase.from("posts").insert({
+          title: `Novo Formulário: ${selectedForm.name}`,
+          content,
+          category: "formulario",
+          form_id: selectedForm.id,
+          is_public: !!selectedForm.isPublic,
+          is_published: true,
+          author_id: session?.user?.id || null,
+        })
+
+        if (postErr) {
+          console.error("Erro ao publicar notícia do formulário no Mural:", postErr)
+        }
+      }
 
       const index = forms.findIndex((f) => f.id === selectedForm.id)
       let updated: FormTemplate[]
@@ -374,10 +411,11 @@ export default function FormBuilder() {
       setForms(updated)
       setCurrentView("list")
       setSelectedForm(null)
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as Error
       console.error("Error saving form to Supabase:", err)
       toast.error(
-        `Falha ao salvar formulário: ${err.message || "Erro desconhecido"}`
+        `Falha ao salvar formulário: ${error.message || "Erro desconhecido"}`
       )
     }
   }
@@ -393,6 +431,9 @@ export default function FormBuilder() {
       id: generateFormId(),
       name: `${form.name} (Cópia)`,
       createdAt: new Date().toISOString(),
+      presentationPage: form.presentationPage
+        ? JSON.parse(JSON.stringify(form.presentationPage))
+        : undefined,
     }
 
     try {
@@ -406,6 +447,7 @@ export default function FormBuilder() {
         name: duplicated.name,
         description: duplicated.description || null,
         fields: duplicated.fields as any,
+        presentation_page: (duplicated.presentationPage as any) || null,
         is_public: !!duplicated.isPublic,
         created_by: session?.user?.id || null,
       })
@@ -416,9 +458,10 @@ export default function FormBuilder() {
       const updated = [duplicated, ...forms]
       setForms(updated)
       toast.success("Formulário duplicado!")
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as Error
       console.error("Error duplicating form:", err)
-      toast.error(`Falha ao duplicar formulário: ${err.message}`)
+      toast.error(`Falha ao duplicar formulário: ${error.message}`)
     }
   }
 
@@ -443,8 +486,9 @@ export default function FormBuilder() {
       toast.success(
         `Formulário ${nextActive ? "ativado" : "desativado"} com sucesso!`
       )
-    } catch (err: any) {
-      toast.error("Erro ao alterar status do formulário: " + err.message)
+    } catch (err: unknown) {
+      const error = err as Error
+      toast.error("Erro ao alterar status do formulário: " + error.message)
     }
   }
 
@@ -471,19 +515,12 @@ export default function FormBuilder() {
         setSubmissions(updatedSubmissions)
 
         toast.success("Formulário excluído.")
-      } catch (err: any) {
+      } catch (err: unknown) {
+      const error = err as Error
         console.error("Error deleting form:", err)
-        toast.error(`Falha ao excluir formulário: ${err.message}`)
+        toast.error(`Falha ao excluir formulário: ${error.message}`)
       }
     }
-  }
-
-  // Export form schema as JSON file/clipboard
-  const handleExportJSON = (form: FormTemplate, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const schema = JSON.stringify(form, null, 2)
-    navigator.clipboard.writeText(schema)
-    toast.success("Esquema do formulário copiado como JSON!")
   }
 
   // Import form schema from clipboard JSON
@@ -545,10 +582,11 @@ export default function FormBuilder() {
       const updated = [imported, ...forms]
       setForms(updated)
       toast.success("Formulário importado com sucesso!")
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as Error
       console.error("Error importing JSON:", err)
       toast.error(
-        `Falha ao importar JSON: ${err.message || "Verifique a formatação do JSON."}`
+        `Falha ao importar JSON: ${error.message || "Verifique a formatação do JSON."}`
       )
     }
   }
@@ -1002,9 +1040,10 @@ export default function FormBuilder() {
         delete updated[formId]
         setSubmissions(updated)
         toast.success("Respostas apagadas.")
-      } catch (err: any) {
+      } catch (err: unknown) {
+      const error = err as Error
         console.error("Error clearing submissions:", err)
-        toast.error(`Falha ao apagar respostas: ${err.message}`)
+        toast.error(`Falha ao apagar respostas: ${error.message}`)
       }
     }
   }
@@ -1030,9 +1069,10 @@ export default function FormBuilder() {
         }
         setSubmissions(updated)
         toast.success("Resposta apagada.")
-      } catch (err: any) {
+      } catch (err: unknown) {
+      const error = err as Error
         console.error("Error deleting submission:", err)
-        toast.error(`Falha ao apagar resposta: ${err.message}`)
+        toast.error(`Falha ao apagar resposta: ${error.message}`)
       }
     }
   }
@@ -1048,11 +1088,11 @@ export default function FormBuilder() {
             <div>
               <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight text-foreground">
                 <ClipboardList className="h-8 w-8 text-primary" />
-                Gerenciador de Formulários
+                Formulários
               </h1>
               <p className="mt-1 text-muted-foreground">
                 Crie e configure formulários dinâmicos para a vida comunitária,
-                pesquisas e registros de PG.
+                pesquisas e registros dos grupos caseiros.
               </p>
             </div>
 
@@ -1124,20 +1164,38 @@ export default function FormBuilder() {
               {forms.map((form) => {
                 const subCount = submissions[form.id]?.length || 0
                 const connectedRetreats = retreats.filter((r) => r.form_id === form.id)
-                
-                const hasDraftRetreat = connectedRetreats.some((r) => r.status === "rascunho")
-                const hasEndedRetreat = connectedRetreats.some((r) => r.status === "encerrado")
-                const hasExpiredRetreat = connectedRetreats.some((r) => {
-                  const deadline = r.registration_deadline || r.end_date
-                  return deadline && new Date() > new Date(new Date(deadline).setHours(23, 59, 59, 999))
-                })
-                const hasFullRetreat = connectedRetreats.some((r) => r.max_participants && subCount >= r.max_participants)
 
-                const isFormActive = !!form.isActive && (connectedRetreats.length === 0 || (connectedRetreats.some((r) => r.status === "ativo") && !hasExpiredRetreat && !hasFullRetreat && !hasEndedRetreat))
-                const isFormSuspended = !!form.isActive && hasDraftRetreat
-                const isFormExpired = !!form.isActive && hasExpiredRetreat
-                const isFormFull = !!form.isActive && hasFullRetreat
-                const isFormEnded = !!form.isActive && hasEndedRetreat
+                // Select primary retreat prioritizing active, then draft, then ended
+                const activeRetreat = connectedRetreats.find((r) => r.status === "ativo")
+                const primaryRetreat =
+                  activeRetreat ||
+                  connectedRetreats.find((r) => r.status === "rascunho") ||
+                  connectedRetreats[0]
+
+                let isFormActive = !!form.isActive
+                let isFormSuspended = false
+                let isFormExpired = false
+                let isFormFull = false
+                let isFormEnded = false
+
+                if (connectedRetreats.length > 0 && primaryRetreat) {
+                  const deadline = primaryRetreat.registration_deadline || primaryRetreat.end_date
+                  isFormExpired = !!(
+                    deadline &&
+                    new Date() > parseEndOfDay(deadline)
+                  )
+                  isFormFull = !!(
+                    primaryRetreat.max_participants &&
+                    subCount >= primaryRetreat.max_participants
+                  )
+                  isFormSuspended = primaryRetreat.status === "rascunho"
+                  isFormEnded = primaryRetreat.status === "encerrado"
+                  isFormActive =
+                    !!form.isActive &&
+                    primaryRetreat.status === "ativo" &&
+                    !isFormExpired &&
+                    !isFormFull
+                }
                 return (
                   <Card
                     key={form.id}
@@ -1266,16 +1324,6 @@ export default function FormBuilder() {
                           size="icon"
                           variant="ghost"
                           className="h-10 w-10 shrink-0 cursor-pointer rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
-                          onClick={(e) => handleExportJSON(form, e)}
-                          title="Copiar JSON"
-                        >
-                          <Download className="h-4.5 w-4.5" />
-                        </Button>
-
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-10 w-10 shrink-0 cursor-pointer rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
                           onClick={(e) => handleShareLink(form, e)}
                           title="Compartilhar Link"
                         >
@@ -1380,26 +1428,55 @@ export default function FormBuilder() {
                   placeholder="Insira uma descrição explicativa curta..."
                   className="h-auto w-full rounded-none border-none bg-transparent px-0 py-1.5 text-sm text-muted-foreground focus-visible:border-b focus-visible:border-primary/30 focus-visible:ring-0"
                 />
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="form-is-public"
-                    checked={!!selectedForm.isPublic}
-                    onChange={(e) =>
-                      setSelectedForm({
-                        ...selectedForm,
-                        isPublic: e.target.checked,
-                      })
-                    }
-                    className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-primary focus:ring-primary/20 dark:border-zinc-700"
-                  />
-                  <label
-                    htmlFor="form-is-public"
-                    className="cursor-pointer text-xs font-medium text-muted-foreground transition-colors select-none hover:text-foreground"
-                  >
-                    Disponibilizar como Formulário Público (não exige login para
-                    responder)
-                  </label>
+                <div className="flex flex-col gap-2.5 pt-2 border-t border-border/40">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="form-is-public"
+                      checked={!!selectedForm.isPublic}
+                      onChange={(e) =>
+                        setSelectedForm({
+                          ...selectedForm,
+                          isPublic: e.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-primary focus:ring-primary/20 dark:border-zinc-700"
+                    />
+                    <label
+                      htmlFor="form-is-public"
+                      className="cursor-pointer text-xs font-medium text-muted-foreground transition-colors select-none hover:text-foreground"
+                    >
+                      Disponibilizar como Formulário Público (não exige login para responder)
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="form-post-announcement"
+                      checked={postAnnouncement}
+                      onChange={(e) => setPostAnnouncement(e.target.checked)}
+                      className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-primary focus:ring-primary/20 dark:border-zinc-700"
+                    />
+                    <label
+                      htmlFor="form-post-announcement"
+                      className="cursor-pointer text-xs font-medium text-muted-foreground transition-colors select-none hover:text-foreground flex items-center gap-1.5"
+                    >
+                      <Bell className="h-3.5 w-3.5 text-primary" />
+                      Publicar aviso no Mural da Igreja ao salvar
+                    </label>
+                  </div>
+
+                  {postAnnouncement && (
+                    <div className="pt-1 pl-6">
+                      <Input
+                        value={announcementText}
+                        onChange={(e) => setAnnouncementText(e.target.value)}
+                        placeholder="Mensagem personalizada para o Mural (opcional)..."
+                        className="h-9 text-xs rounded-lg max-w-lg"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1428,14 +1505,6 @@ export default function FormBuilder() {
                 </Button>
               )}
               <Button
-                variant="outline"
-                className="h-11 w-full cursor-pointer rounded-md border-border text-sm transition-all active:scale-95 sm:w-auto"
-                onClick={(e) => handleExportJSON(selectedForm, e)}
-              >
-                <Copy className="mr-2 h-4 w-4" />
-                Copiar JSON
-              </Button>
-              <Button
                 onClick={handleSaveForm}
                 className="h-11 w-full cursor-pointer rounded-md bg-primary px-6 font-bold text-primary-foreground shadow-md transition-all hover:bg-primary/90 active:scale-95 sm:w-auto"
               >
@@ -1445,43 +1514,90 @@ export default function FormBuilder() {
             </div>
           </div>
 
-          {/* Builder Workspace Layout */}
-          <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-            {/* Mobile Tab Control */}
-            <div className="col-span-1 flex overflow-hidden rounded-xl border border-border bg-card/30 p-1 lg:hidden">
+          {/* Builder Navigation Tab Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/30 p-1.5 shadow-sm">
+            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto custom-scrollbar pb-1">
               <button
+                type="button"
                 onClick={() => setBuilderTab("edit")}
-                className={`flex-1 rounded-lg py-3 text-[10px] font-bold tracking-normal uppercase transition-all sm:text-xs sm:tracking-widest ${builderTab === "edit" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground"}`}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-bold transition-all shrink-0 cursor-pointer min-h-[44px] ${
+                  builderTab === "edit"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                }`}
               >
-                Editar Campos
+                <ClipboardList className="h-4 w-4" />
+                <span>Campos do Formulário</span>
               </button>
+
               <button
+                type="button"
+                onClick={() => setBuilderTab("presentation")}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-bold transition-all shrink-0 cursor-pointer min-h-[44px] ${
+                  builderTab === "presentation"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                }`}
+              >
+                <FileText className="h-4 w-4" />
+                <span>Página de Apresentação</span>
+                {selectedForm.presentationPage?.enabled && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      builderTab === "presentation"
+                        ? "bg-white/20 text-white"
+                        : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                    }`}
+                  >
+                    Ativada
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setBuilderTab("preview")}
-                className={`flex-1 rounded-lg py-3 text-[10px] font-bold tracking-normal uppercase transition-all sm:text-xs sm:tracking-widest ${builderTab === "preview" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground"}`}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-bold transition-all shrink-0 cursor-pointer min-h-[44px] lg:hidden ${
+                  builderTab === "preview"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                }`}
               >
-                Testar Preview
-              </button>
-              <button
-                onClick={() => setBuilderTab("json")}
-                className={`flex-1 rounded-lg py-3 text-[10px] font-bold tracking-normal uppercase transition-all sm:text-xs sm:tracking-widest ${builderTab === "json" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground"}`}
-              >
-                Esquema JSON
+                <Eye className="h-4 w-4" />
+                <span>Preview</span>
               </button>
             </div>
+          </div>
 
-            {/* COLUMN 1: FIELD EDITOR PANEL (Show on desktop or when active tab is 'edit') */}
-            <div
-              className={`col-span-1 ${showPreview ? "lg:col-span-7" : "lg:col-span-12"} space-y-6 ${builderTab === "edit" ? "block" : "hidden lg:block"}`}
-            >
+          {/* Builder Workspace Layout */}
+          <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
+            {builderTab === "presentation" ? (
+              <div className="col-span-1 lg:col-span-12">
+                <FormPresentationEditor
+                  form={selectedForm}
+                  retreat={retreats.find((r) => r.form_id === selectedForm.id) || null}
+                  onChange={(presentationPage) =>
+                    setSelectedForm((prev) =>
+                      prev ? { ...prev, presentationPage } : null
+                    )
+                  }
+                />
+              </div>
+            ) : (
+              <>
+                {/* COLUMN 1: FIELD EDITOR PANEL (Show on desktop or when active tab is 'edit') */}
+                <div
+                  className={`col-span-1 ${showPreview ? "lg:col-span-7" : "lg:col-span-12"} space-y-6 ${builderTab === "edit" ? "block" : "hidden lg:block"}`}
+                >
               {/* Header Text Block */}
               <div className="rounded-xl border border-border/40 bg-card/20 p-5 dark:bg-zinc-900/10">
                 <h3 className="text-lg font-bold text-foreground">
                   Desenho do Formulário
                 </h3>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Monte as perguntas do seu formulário no estilo Notion. Clique
+                  Monte as perguntas do seu formulário no estilo Notion. Selecione
                   em qualquer pergunta para editá-la em tempo real e insira
-                  novos campos clicando nos botões flutuantes{" "}
+                  novos campos usando os botões flutuantes{" "}
                   <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
                     +
                   </code>
@@ -1853,33 +1969,11 @@ export default function FormBuilder() {
                 </CardContent>
               </Card>
             </div>
-
-            {/* COLUMN 3: RAW JSON SCHEMATIC VIEW (Show on mobile active tab 'json') */}
-            <div
-              className={`col-span-1 space-y-4 ${builderTab === "json" ? "block" : "hidden"}`}
-            >
-              <Card className="rounded-xl border-border bg-card/40 p-5 shadow-lg backdrop-blur-xl">
-                <div className="mb-4 flex items-center justify-between border-b border-border/50 pb-3">
-                  <h3 className="text-sm font-bold text-foreground">
-                    Esquema Estrutural JSON
-                  </h3>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={(e) => handleExportJSON(selectedForm, e)}
-                    className="h-8 cursor-pointer rounded-md"
-                  >
-                    Copiar JSON
-                  </Button>
-                </div>
-                <pre className="max-h-[450px] overflow-x-auto rounded-lg border border-border/60 bg-background p-4 font-mono text-[10px] leading-normal text-muted-foreground">
-                  {JSON.stringify(selectedForm, null, 2)}
-                </pre>
-              </Card>
-            </div>
-          </div>
+          </>
+        )}
         </div>
-      )}
+      </div>
+    )}
 
       {/* VIEW SUBMISSIONS MODAL */}
       {viewingSubmissionsFormId &&
@@ -1892,7 +1986,7 @@ export default function FormBuilder() {
 
           return (
             <div className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-black/80 p-4 backdrop-blur-xs duration-200 fade-in">
-              <div className="flex max-h-[85vh] w-full max-w-4xl animate-in flex-col overflow-hidden rounded-xl border border-border/80 bg-background shadow-2xl duration-200 zoom-in-95">
+              <div className="flex max-h-[90dvh] w-[95vw] sm:max-w-4xl lg:max-w-5xl animate-in flex-col overflow-hidden rounded-2xl border border-border/80 bg-background shadow-2xl duration-200 zoom-in-95">
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-border p-6">
                   <div>
@@ -1919,7 +2013,7 @@ export default function FormBuilder() {
                 </div>
 
                 {/* Content area */}
-                <div className="max-h-[calc(85vh-160px)] min-h-[250px] flex-1 overflow-y-auto p-6">
+                <div className="max-h-[calc(85vh-160px)] min-h-[250px] flex-1 overflow-y-auto p-6 custom-scrollbar">
                   {formSubs.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground italic">
                       Nenhuma resposta enviada ainda. Use o preview para testar
@@ -1927,7 +2021,7 @@ export default function FormBuilder() {
                     </div>
                   ) : (
                     <div className="overflow-hidden rounded-lg border border-border/50 bg-card/25 shadow-sm">
-                      <div className="overflow-x-auto">
+                      <div className="overflow-x-auto custom-scrollbar">
                         <table className="w-full border-collapse text-left text-xs">
                           <thead>
                             <tr className="border-b border-border/80 bg-muted/70 font-bold tracking-wider text-muted-foreground uppercase">
@@ -2934,7 +3028,7 @@ function FloatingAddBlockButton({ onAdd }: FloatingAddBlockButtonProps) {
           <Button
             size="icon"
             variant="outline"
-            className="z-10 h-7 w-7 cursor-pointer rounded-full border-border bg-background opacity-25 shadow-sm transition-all group-hover/fab:opacity-100 hover:scale-110 hover:border-primary hover:text-primary hover:opacity-100 focus:opacity-100"
+            className="z-10 h-7 w-7 cursor-pointer rounded-full border-border bg-background opacity-25 shadow-sm transition-all group-hover/fab:opacity-100 hover:border-primary hover:text-primary hover:opacity-100 focus:opacity-100"
             title="Inserir campo aqui"
           >
             <Plus className="h-4 w-4" />

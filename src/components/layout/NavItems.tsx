@@ -2,24 +2,24 @@ import {
   Home,
   Users,
   BookOpen,
-  PlusSquare,
   Calendar,
-  MessageSquare,
-  Settings,
-  User,
   ClipboardList,
+  type LucideIcon,
 } from "lucide-react";
 
-export const navItems = [
-  { name: "Início", href: "/", icon: Home },
-  { name: "Grupos Caseiros", href: "/grupos-caseiros", icon: Users, requireAdmin: true },
+export interface NavItem {
+  name: string;
+  href: string;
+  icon: LucideIcon;
+  requireAdmin?: boolean;
+  requireManagement?: boolean;
+  requireCanPost?: boolean;
+}
+
+export const navItems: NavItem[] = [
+  { name: "Início", href: "/dashboard", icon: Home },
   { name: "Ensinos", href: "/ensinos", icon: BookOpen },
-  { name: "Nova Notícia", href: "/noticias/nova", icon: PlusSquare },
-  { name: "Eventos", href: "/eventos", icon: Calendar },
-  { name: "Gestão de Eventos", href: "/gestao/eventos", icon: Calendar, requireManagement: true },
-  { name: "Mensagens", href: "/mensagens", icon: MessageSquare },
-  { name: "Gestão de Membros", href: "/gestao/vinculados", icon: Users, requireManagement: true },
+  { name: "Gestão de Eventos", href: "/manage-events", icon: Calendar, requireManagement: true },
+  { name: "Gestão do Corpo", href: "/gestao", icon: Users, requireManagement: true },
   { name: "Formulários", href: "/gestao/formularios", icon: ClipboardList, requireCanPost: true },
-  { name: "Perfil", href: "/perfil", icon: User },
-  { name: "Ajustes", href: "/ajustes", icon: Settings },
 ];

@@ -3,15 +3,21 @@
 ## 1. Stack Visual
 - **Framework:** React 19 + Tailwind CSS v4.
 - **Biblioteca de Componentes:** shadcn/ui (radix-ui).
+- **Tabelas de Dados:** TanStack Table v9 (`@tanstack/react-table`).
 - **Tipografia:** Geist Variable (font-sans).
 
-## 2. Design Tokens (Light / Dark Mode)
+## 2. Design Tokens (Light / Dark Mode) & Arquivo de Constantes de Cores
 O sistema DEVE suportar `next-themes`. Todas as classes Tailwind geradas devem prever o estado dark.
 
-### Cores Primárias (Monocromático/Clean)
+### 2.1. Arquivo de Constantes Centralizado (`src/constants/colors.ts`) — REGRA OBRIGATÓRIA
+- **Fonte Única da Verdade:** Todas as definições de cores, tokens semânticos, paletas de gráficos/canvas e classes Tailwind padrão estão centralizadas em `src/constants/colors.ts` (re-exportado em `src/lib/colors.ts`).
+- **Regra de Uso:** Em qualquer contexto de código (especialmente HTML5 Canvas, mapas Leaflet, gráficos, SVGs, ou estilos dinâmicos), **NUNCA** use códigos hexadecimais ou strings de cores soltas/hardcoded. Importe as cores diretamente de `@/constants/colors`.
+- **Regra de Atualização:** Qualquer nova cor, tonalidade de status, token de tema ou variante visual introduzida no projeto **DEVE ser obrigatoriamente adicionada e documentada em `src/constants/colors.ts`**. É terminantemente proibido introduzir cores no código sem atualizar o arquivo de constantes.
+
+### 2.2. Cores Primárias (Monocromático/Clean)
 - **Fundo Principal (Background):**
-  - Light: `bg-zinc-50` ou `bg-white`
-  - Dark: `dark:bg-zinc-950`
+  - Light: `bg-zinc-50` ou `bg-white` (`#fafafa` / `#ffffff`)
+  - Dark: `dark:bg-zinc-950` (`#09090b`)
 - **Superfícies (Cards, Modais):**
   - Light: `bg-white border-zinc-200`
   - Dark: `dark:bg-zinc-900 dark:border-zinc-800`
@@ -29,9 +35,63 @@ O sistema DEVE suportar `next-themes`. Todas as classes Tailwind geradas devem p
   - Desktop: Sidebar lateral fixa (`w-64`, border right).
   - Mobile: Bottom Tab Bar fixa com ícones Lucide React.
   - O header principal deve SEMPRE conter o `ThemeToggle` e o `UserAvatar`.
+- **Fluxo de Gestão de Eventos (Arquitetura de Duas Páginas):** A gestão de eventos e retiros segue arquitetura dedicada de duas páginas:
+  - `/manage-events`: Dashboard em grid responsivo (`EventCard`) com filtros em pílula por status (`ativo`, `rascunho`, `encerrado`), busca em tempo real e criação via modal (`CreateEditEventDialog`). Redirecionamentos legados a partir de `/gestao/eventos`.
+  - `/manage-events/:eventId`: Painel de gestão completa com banner superior, 4 cartões de KPIs analíticos (`EventKpiCards`), sistema de check-in e credenciamento ágil para portaria (`EventCheckInTab` com placar ao vivo, busca instantânea por nome/CPF, cards mobile-first e alvos de toque 44px+), tabela de dados com busca global e filtros (`EventDataTable`), divisão de quartos/alojamentos (`RoomManagementTab`), controle financeiro de despesas (`EventFinanceTab`), lista de espera (`EventWaitlistTab`), equipes de serviço (`EventTeamsTab`), métricas analíticas e diálogo de impressão/exportação em PDF (`EventPrintListsDialog`). NUNCA utilize side-panels estreitos ou listas espremidas para esta finalidade.
+- **Relatórios Impressos e Exportação em PDF (Operação Offline / @media print):**
+  - Para eventos, retiros ou operações em sítios e zonas rurais sem conectividade garantida, o sistema provê relatórios físicos formatados em A4 gerados via `window.print()` / PDF.
+  - **Isolamento de Contêiner de Impressão:** Devido a limitações dos motores de renderização dos navegadores (onde elementos dentro de containers com `position: fixed` ou overflow em modais Radix/Dialog não quebram páginas corretamente), o conteúdo para impressão DEVE ser renderizado via Portal (`createPortal`) diretamente no `document.body` em um contêiner `#event-print-container`.
+  - **Regras CSS `@media print` (`src/index.css`):**
+    - `@page { size: A4 portrait; margin: 12mm; }`
+    - Ocultação de toda a casca da aplicação (`#root`, botões, modais Radix, toasts): `#root, [data-radix-portal] { display: none !important; }`
+    - Quebras de página controladas por folha (`.print-page-break { break-after: page; page-break-after: always; }` e `break-inside: avoid;`).
+    - Repetição automática do cabeçalho da tabela em todas as páginas: `thead { display: table-header-group; }`.
+    - Estilização em alto contraste, preto e branco/escala de cinza para economia de tinta e nitidez em impressoras monocromáticas.
+- **Fluxo de Lista de Espera (Event Waitlist):**
+  - **Experiência do Participante:** Quando um evento atinge lotação máxima (`closedReason === 'full'`), o formulário de inscrição (`FormResponder`) e a página do evento (`Events`) exibem um mini-formulário acolhedor (`EventWaitlistForm` / `EventWaitlistDialog`) solicitando dados de contato e modalidade de viagem. Se o participante assinalar "Já comprei passagem", recebe confirmação imediata de prioridade.
+  - **Bypass de Capacidade:** Participantes chamados pela liderança recebem links com parâmetro `?waitlist_id=...` (ou cupons/convites), que contornam o bloqueio de lotação e marcam o status do participante na fila automaticamente como `inscrito` após o envio da inscrição.
+  - **Gestão da Liderança (`EventWaitlistTab`):** Exibe a fila em ordem cronológica estrita de chegada (`created_at ASC`), numeração de fila `#1, #2...`, badges de status e destaque prioritário (púrpura de alto contraste AAA) para quem tem passagem comprada. Inclui ação "Chamar Participante" com geração de links, código de liberação e integração direta com WhatsApp.
 
-## 4. Geração de Telas
-Sempre que o agente for instruído a criar uma nova página, ele deve:
-1. Compor a página inteiramente usando peças existentes na pasta `src/components/ui/`.
-2. Adicionar o wrapper do Layout (Desktop/Mobile).
-3. Nunca usar cores fixas (como `text-black` ou `bg-white`) sem a contraparte `dark:`.
+## 4. Ferramentas MCP de UI/UX (Stitch & Acessibilidade)
+
+### 4.1. Accessibility MCP (`accessibility`) — Validação WCAG
+- **Ferramentas Disponíveis:** `are-colors-accessible`, `get-color-contrast`, `use-light-or-dark`.
+- **Quando Usar:**
+  - Sempre que novas cores ou combinações de cores forem propostas ou adicionadas a `src/constants/colors.ts`.
+  - Ao criar novos botões, badges, alertas ou elementos com contraste entre texto e fundo.
+  - O agente deve validar se o par de cores atinge o padrão **WCAG AA** (mínimo de 4.5:1 para texto normal e 3:1 para texto grande/componentes) tanto para o tema **Light** quanto para o tema **Dark**.
+  - **Validação Estrita de Contraste:** Textos normais e componentes interativos primários (ex: botões de ação e links principais) DEVEM alcançar conformidade com **WCAG AAA** (mínimo 7.0:1) no modo Light e no modo Dark sempre que viável, e NUNCA menos que **WCAG AA** (mínimo 4.5:1).
+  - Em caso de dúvida sobre texto claro ou escuro sobre fundos customizados, execute `use-light-or-dark` para selecionar a combinação ideal de contraste.
+
+### 4.2. Stitch MCP (`StitchMCP`) — Prototipagem e Design Systems
+- **Ferramentas Disponíveis:** `generate_screen_from_text`, `generate_variants`, `edit_screens`, `get_screen`, `list_screens`, `upload_design_md`, `create_design_system_from_design_md`, `apply_design_system`.
+- **Quando Usar:**
+  - **Geração de Novas Telas/Layouts:** Ao ser solicitado a criar novas páginas, fluxos complexos ou reformulações visuais completas, utilize o Stitch MCP (`generate_screen_from_text` ou `generate_variants`) para conceber protótipos de tela e explorar alternativas de layout antes de codificar os componentes React.
+  - **Sincronização com o Design System:** Ao atualizar a identidade ou documentação de design, utilize as ferramentas de sincronização (`upload_design_md`, `apply_design_system`) para manter os protótipos alinhados ao sistema de design do projeto.
+  - **Edição e Variações Visuais:** Utilize `edit_screens` e `generate_variants` para iterar layouts de forma assistida quando o usuário desejar comparar propostas de interface.
+
+### 4.3. Animações e Acessibilidade Vestibular (`prefers-reduced-motion`)
+- **Regra de Ouro:** Qualquer animação CSS, transição com `transform`/`scale` ou efeito de translação implementado DEVE obrigatoriamente respeitar a media query `@media (prefers-reduced-motion: reduce)`.
+- Quando o usuário tiver ativado o movimento reduzido no sistema operacional ou navegador, as durações devem ser colapsadas (`animation-duration: 0.001ms !important`, `transition-duration: 0.001ms !important`) e os deslocamentos táteis anulados (`transform: none !important`).
+
+## 5. Geração de Telas e Edição de UI
+Sempre que o agente for instruído a criar ou editar elementos de UI, ele deve:
+1. Compor a página/componente priorizando o uso de peças existentes na pasta `src/components/ui/` (shadcn/ui).
+2. Consultar e importar valores de cor e classes do arquivo centralizado `src/constants/colors.ts`.
+3. Validar a acessibilidade visual e contraste (WCAG AA/AAA) com o MCP `accessibility`.
+4. Para telas novas complexas, considerar prototipação prévia com o `StitchMCP`.
+5. Adicionar o wrapper do Layout (Desktop/Mobile) correspondente.
+6. Nunca usar cores fixas (como `text-black` ou `bg-white`) sem a contraparte `dark:`.
+7. **Verificação Pós-Edição:** Após qualquer alteração que envolva UI, verificar se não há componentes nativos ou customizados sendo implementados/mantidos que poderiam (e deveriam) ser substituídos por componentes do `shadcn/ui` já instalados ou disponíveis para instalação.
+8. **Acessibilidade Vestibular:** Garantir que novas animações ou transições incluam suporte a `prefers-reduced-motion`.
+
+## 6. Proibições Visuais Estritas (Anti-AI Slop & Higiene de Interface)
+Os agentes estão **terminantemente proibidos** de introduzir clichês visuais de geração automática por IA:
+1. **Banimento do Ícone `Sparkles` (`✨`):** NUNCA utilize o ícone `Sparkles` (`lucide-react`) para temas teológicos, títulos, avisos, eventos ou badges de hospitalidade. Prefira ícones semânticos sóbrios (`BookOpen`, `Calendar`, `HeartHandshake`, `Home`, `Users`) ou ausência de ícone.
+2. **Proibição de Bento Grids SaaS e Gradientes Coloridos Arbitrários:** NUNCA crie cards com brilhos de fundo multicor (`from-emerald-...`, `from-amber-...`, `from-teal-...`), caixas de ícones coloridas em arco-íris ou efeitos de levitação exagerados (`hover:-translate-y-1`, `group-hover:scale-105`). Mantenha a sobriedade monocromática e os tokens semânticos de `src/constants/colors.ts`.
+3. **Sem Empilhamento de Metadados (Eyebrow + Kicker + Badge + Hashtags):** NUNCA empilhe um `<Badge>` superior + subtítulo em caixa alta (`uppercase tracking-wider`) + título + descrição + `#hashtags` em um mesmo card ou seção.
+4. **Sem Molduras de Pôster Gráfico (Mockup Chrome):** Ao implementar telas a partir de imagens de referência, NUNCA codifique elementos decorativos de pôster/Instagram como elementos de interface web (ex: repetir `<ChurchLogo />` no topo de cards internos, criar badges não-clicáveis com verbos de ação como *"Ver Programação"*, ou barras de rodapé dentro de cards repetindo o mês/ano que já está visível no componente).
+5. **Sem Duplicação de Informação no Mesmo Card/Modal:** Nunca repita a mesma informação (como data/horário ou mês vigente) no cabeçalho, no corpo e no rodapé do mesmo componente.
+6. **Fluxo Único de CTA (Sem Formulários Competindo):** Nunca coloque múltiplos botões lado a lado na mesma seção que abram formulários duplicados (ex: formulário inline + modal idêntico + página dedicada). Nunca rotule um botão como *"Ver Grupos por Bairro"* se a ação abrir apenas um formulário de contato.
+7. **Validação de Rotas Públicas vs. Protegidas (`ProtectedRoute`):** Antes de inserir qualquer `<Link to="...">` em páginas públicas (`Landing`, `QueroSaberMais`, visão de visitante em `Ensinos`), verifique obrigatoriamente em `src/App.tsx` se a rota de destino NÃO está envolvida por `<ProtectedRoute>` (ex: `/eventos` é restrita a usuários autenticados e nunca deve ser destino de CTA público).
+8. **Sem Links Sociais Placeholder:** NUNCA insira links externos apontando para domínios raiz genéricos (`https://youtube.com`, `https://instagram.com`). Se a URL real não existir, omita o botão.

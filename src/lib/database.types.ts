@@ -10,10 +10,126 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.4"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
+      event_coupons: {
+        Row: {
+          code: string
+          cpf: string | null
+          created_at: string
+          created_by: string | null
+          discount_percent: number
+          form_id: string | null
+          id: string
+          is_used: boolean
+          notes: string | null
+          retreat_id: string | null
+          target_service_team: string | null
+          used_at: string | null
+          used_by_email: string | null
+          used_by_name: string | null
+        }
+        Insert: {
+          code: string
+          cpf?: string | null
+          created_at?: string
+          created_by?: string | null
+          discount_percent?: number
+          form_id?: string | null
+          id?: string
+          is_used?: boolean
+          notes?: string | null
+          retreat_id?: string | null
+          target_service_team?: string | null
+          used_at?: string | null
+          used_by_email?: string | null
+          used_by_name?: string | null
+        }
+        Update: {
+          code?: string
+          cpf?: string | null
+          created_at?: string
+          created_by?: string | null
+          discount_percent?: number
+          form_id?: string | null
+          id?: string
+          is_used?: boolean
+          notes?: string | null
+          retreat_id?: string | null
+          target_service_team?: string | null
+          used_at?: string | null
+          used_by_email?: string | null
+          used_by_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_coupons_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_coupons_retreat_id_fkey"
+            columns: ["retreat_id"]
+            isOneToOne: false
+            referencedRelation: "retreats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_waitlist: {
+        Row: {
+          city_state: string | null
+          cpf: string | null
+          created_at: string
+          email: string
+          full_name: string
+          id: string
+          notes: string | null
+          phone: string
+          retreat_id: string
+          status: "aguardando" | "chamado" | "inscrito" | "desistiu"
+          travel_mode: string | null
+        }
+        Insert: {
+          city_state?: string | null
+          cpf?: string | null
+          created_at?: string
+          email: string
+          full_name: string
+          id?: string
+          notes?: string | null
+          phone: string
+          retreat_id: string
+          status?: "aguardando" | "chamado" | "inscrito" | "desistiu"
+          travel_mode?: string | null
+        }
+        Update: {
+          city_state?: string | null
+          cpf?: string | null
+          created_at?: string
+          email?: string
+          full_name?: string
+          id?: string
+          notes?: string | null
+          phone?: string
+          retreat_id?: string
+          status?: "aguardando" | "chamado" | "inscrito" | "desistiu"
+          travel_mode?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_waitlist_retreat_id_fkey"
+            columns: ["retreat_id"]
+            isOneToOne: false
+            referencedRelation: "retreats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       fellowships: {
         Row: {
           created_at: string | null
@@ -89,6 +205,7 @@ export type Database = {
           is_active: boolean | null
           is_public: boolean
           name: string
+          presentation_page: Json | null
         }
         Insert: {
           created_at?: string
@@ -99,6 +216,7 @@ export type Database = {
           is_active?: boolean | null
           is_public?: boolean
           name: string
+          presentation_page?: Json | null
         }
         Update: {
           created_at?: string
@@ -109,6 +227,7 @@ export type Database = {
           is_active?: boolean | null
           is_public?: boolean
           name?: string
+          presentation_page?: Json | null
         }
         Relationships: []
       }
@@ -211,37 +330,58 @@ export type Database = {
           author_id: string | null
           category: Database["public"]["Enums"]["post_category"]
           content: string
-          created_at: string | null
+          created_at: string
           event_end_date: string | null
+          event_label: string | null
+          event_location: string | null
           event_start_date: string | null
+          form_id: string | null
           id: string
           image_urls: string[] | null
-          is_published: boolean | null
+          is_public: boolean
+          is_published: boolean
+          media_resource_id: string | null
+          retreat_id: string | null
           title: string
+          updated_at: string
         }
         Insert: {
           author_id?: string | null
           category?: Database["public"]["Enums"]["post_category"]
           content: string
-          created_at?: string | null
+          created_at?: string
           event_end_date?: string | null
+          event_label?: string | null
+          event_location?: string | null
           event_start_date?: string | null
+          form_id?: string | null
           id?: string
           image_urls?: string[] | null
-          is_published?: boolean | null
+          is_public?: boolean
+          is_published?: boolean
+          media_resource_id?: string | null
+          retreat_id?: string | null
           title: string
+          updated_at?: string
         }
         Update: {
           author_id?: string | null
           category?: Database["public"]["Enums"]["post_category"]
           content?: string
-          created_at?: string | null
+          created_at?: string
           event_end_date?: string | null
+          event_label?: string | null
+          event_location?: string | null
           event_start_date?: string | null
+          form_id?: string | null
           id?: string
           image_urls?: string[] | null
-          is_published?: boolean | null
+          is_public?: boolean
+          is_published?: boolean
+          media_resource_id?: string | null
+          retreat_id?: string | null
           title?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -249,6 +389,27 @@ export type Database = {
             columns: ["author_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "posts_media_resource_id_fkey"
+            columns: ["media_resource_id"]
+            isOneToOne: false
+            referencedRelation: "media_resources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "posts_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "posts_retreat_id_fkey"
+            columns: ["retreat_id"]
+            isOneToOne: false
+            referencedRelation: "retreats"
             referencedColumns: ["id"]
           },
         ]
@@ -264,11 +425,13 @@ export type Database = {
           address_zip_code: string | null
           avatar_url: string | null
           baptism_date: string | null
-          birth_date: string
+          is_baptized: boolean
+          birth_date: string | null
           can_post: boolean | null
-          cpf: string
+          cpf: string | null
           created_at: string
           dependents_count: number | null
+          custom_discipler_name: string | null
           discipler_id: string | null
           drivers_license: string | null
           education_level: string | null
@@ -281,6 +444,7 @@ export type Database = {
           household_income: string | null
           housing_status: string | null
           id: string
+          is_church_linked: boolean
           is_deacon: boolean | null
           is_dev: boolean | null
           is_presbyter: boolean | null
@@ -301,11 +465,13 @@ export type Database = {
           address_zip_code?: string | null
           avatar_url?: string | null
           baptism_date?: string | null
-          birth_date: string
+          is_baptized?: boolean
+          birth_date?: string | null
           can_post?: boolean | null
-          cpf: string
+          cpf?: string | null
           created_at?: string
           dependents_count?: number | null
+          custom_discipler_name?: string | null
           discipler_id?: string | null
           drivers_license?: string | null
           education_level?: string | null
@@ -318,6 +484,7 @@ export type Database = {
           household_income?: string | null
           housing_status?: string | null
           id?: string
+          is_church_linked?: boolean
           is_deacon?: boolean | null
           is_dev?: boolean | null
           is_presbyter?: boolean | null
@@ -338,11 +505,13 @@ export type Database = {
           address_zip_code?: string | null
           avatar_url?: string | null
           baptism_date?: string | null
-          birth_date?: string
+          is_baptized?: boolean
+          birth_date?: string | null
           can_post?: boolean | null
-          cpf?: string
+          cpf?: string | null
           created_at?: string
           dependents_count?: number | null
+          custom_discipler_name?: string | null
           discipler_id?: string | null
           drivers_license?: string | null
           education_level?: string | null
@@ -355,6 +524,7 @@ export type Database = {
           household_income?: string | null
           housing_status?: string | null
           id?: string
+          is_church_linked?: boolean
           is_deacon?: boolean | null
           is_dev?: boolean | null
           is_presbyter?: boolean | null
@@ -405,6 +575,10 @@ export type Database = {
       }
       registrations: {
         Row: {
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          checked_in_at: string | null
+          checked_in_by: string | null
           created_at: string | null
           custom_responses: Json | null
           form_submission_id: string | null
@@ -417,8 +591,15 @@ export type Database = {
           profile_id: string | null
           retreat_id: string | null
           room_allocation: string | null
+          room_id: string | null
+          service_team: string | null
+          status: "confirmado" | "presente" | "cancelado"
         }
         Insert: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          checked_in_at?: string | null
+          checked_in_by?: string | null
           created_at?: string | null
           custom_responses?: Json | null
           form_submission_id?: string | null
@@ -431,8 +612,15 @@ export type Database = {
           profile_id?: string | null
           retreat_id?: string | null
           room_allocation?: string | null
+          room_id?: string | null
+          service_team?: string | null
+          status?: "confirmado" | "presente" | "cancelado"
         }
         Update: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          checked_in_at?: string | null
+          checked_in_by?: string | null
           created_at?: string | null
           custom_responses?: Json | null
           form_submission_id?: string | null
@@ -445,8 +633,18 @@ export type Database = {
           profile_id?: string | null
           retreat_id?: string | null
           room_allocation?: string | null
+          room_id?: string | null
+          service_team?: string | null
+          status?: "confirmado" | "presente" | "cancelado"
         }
         Relationships: [
+          {
+            foreignKeyName: "registrations_checked_in_by_fkey"
+            columns: ["checked_in_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "registrations_form_submission_id_fkey"
             columns: ["form_submission_id"]
@@ -468,6 +666,102 @@ export type Database = {
             referencedRelation: "retreats"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "registrations_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "retreat_rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retreat_expenses: {
+        Row: {
+          amount: number
+          category: string | null
+          created_at: string | null
+          created_by: string | null
+          description: string
+          expense_date: string | null
+          id: string
+          notes: string | null
+          retreat_id: string
+        }
+        Insert: {
+          amount?: number
+          category?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          description: string
+          expense_date?: string | null
+          id?: string
+          notes?: string | null
+          retreat_id: string
+        }
+        Update: {
+          amount?: number
+          category?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string
+          expense_date?: string | null
+          id?: string
+          notes?: string | null
+          retreat_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retreat_expenses_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retreat_expenses_retreat_id_fkey"
+            columns: ["retreat_id"]
+            isOneToOne: false
+            referencedRelation: "retreats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retreat_rooms: {
+        Row: {
+          capacity: number
+          created_at: string | null
+          gender_type: string | null
+          id: string
+          name: string
+          notes: string | null
+          retreat_id: string
+        }
+        Insert: {
+          capacity?: number
+          created_at?: string | null
+          gender_type?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          retreat_id: string
+        }
+        Update: {
+          capacity?: number
+          created_at?: string | null
+          gender_type?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          retreat_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retreat_rooms_retreat_id_fkey"
+            columns: ["retreat_id"]
+            isOneToOne: false
+            referencedRelation: "retreats"
+            referencedColumns: ["id"]
+          },
         ]
       }
       retreats: {
@@ -477,12 +771,14 @@ export type Database = {
           end_date: string | null
           form_id: string | null
           form_model: Database["public"]["Enums"]["retreat_form_model"] | null
+          has_payment: boolean | null
           id: string
           image_url: string | null
           location_text: string | null
           max_participants: number | null
           price: number | null
           registration_deadline: string | null
+          spreadsheet_data: Json | null
           start_date: string | null
           status: string | null
           title: string
@@ -493,12 +789,14 @@ export type Database = {
           end_date?: string | null
           form_id?: string | null
           form_model?: Database["public"]["Enums"]["retreat_form_model"] | null
+          has_payment?: boolean | null
           id?: string
           image_url?: string | null
           location_text?: string | null
           max_participants?: number | null
           price?: number | null
           registration_deadline?: string | null
+          spreadsheet_data?: Json | null
           start_date?: string | null
           status?: string | null
           title: string
@@ -509,12 +807,14 @@ export type Database = {
           end_date?: string | null
           form_id?: string | null
           form_model?: Database["public"]["Enums"]["retreat_form_model"] | null
+          has_payment?: boolean | null
           id?: string
           image_url?: string | null
           location_text?: string | null
           max_participants?: number | null
           price?: number | null
           registration_deadline?: string | null
+          spreadsheet_data?: Json | null
           start_date?: string | null
           status?: string | null
           title?: string
@@ -664,6 +964,61 @@ export type Database = {
           },
         ]
       }
+      study_notes: {
+        Row: {
+          content: string
+          created_at: string | null
+          id: string
+          media_resource_id: string | null
+          profile_id: string
+          study_id: string | null
+          title: string
+          updated_at: string | null
+        }
+        Insert: {
+          content?: string
+          created_at?: string | null
+          id?: string
+          media_resource_id?: string | null
+          profile_id: string
+          study_id?: string | null
+          title?: string
+          updated_at?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string | null
+          id?: string
+          media_resource_id?: string | null
+          profile_id?: string
+          study_id?: string | null
+          title?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_notes_media_resource_id_fkey"
+            columns: ["media_resource_id"]
+            isOneToOne: false
+            referencedRelation: "media_resources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_notes_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_notes_study_id_fkey"
+            columns: ["study_id"]
+            isOneToOne: false
+            referencedRelation: "studies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -690,6 +1045,7 @@ export type Database = {
           full_name: string
           gender: string
           has_baptism_date: boolean
+          is_baptized?: boolean
           household_income: string
           housing_status: string
           is_linked: boolean
@@ -699,15 +1055,49 @@ export type Database = {
           profile_id: string
         }[]
       }
+      patch_retreat_sheet_metadata: {
+        Args: { p_metadata: Json; p_retreat_id: string; p_sheet_name: string }
+        Returns: undefined
+      }
+      patch_retreat_spreadsheet_cell: {
+        Args: {
+          p_cell_coord: string
+          p_retreat_id: string
+          p_sheet_name: string
+          p_value: Json
+        }
+        Returns: undefined
+      }
+      redeem_coupon: {
+        Args: {
+          p_code: string
+          p_cpf?: string
+          p_form_id?: string
+          p_retreat_id?: string
+          p_user_email?: string
+          p_user_name?: string
+        }
+        Returns: Json
+      }
+      validate_coupon: {
+        Args: {
+          p_code: string
+          p_cpf?: string
+          p_form_id?: string
+          p_retreat_id?: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       media_type: "video" | "pdf" | "markdown"
       post_category:
-        | "noticia"
+        | "geral"
         | "oracao"
-        | "diaconato"
-        | "obra"
-        | "aviso"
+        | "missoes"
+        | "encontro"
+        | "estudo"
+        | "formulario"
         | "evento"
       retreat_form_model: "geral" | "socioeconomico" | "logistica"
     }
@@ -725,12 +1115,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -754,11 +1144,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -779,11 +1169,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -804,11 +1194,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -821,11 +1211,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -839,11 +1229,12 @@ export const Constants = {
     Enums: {
       media_type: ["video", "pdf", "markdown"],
       post_category: [
-        "noticia",
+        "geral",
         "oracao",
-        "diaconato",
-        "obra",
-        "aviso",
+        "missoes",
+        "encontro",
+        "estudo",
+        "formulario",
         "evento",
       ],
       retreat_form_model: ["geral", "socioeconomico", "logistica"],
