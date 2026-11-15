@@ -7,7 +7,7 @@ DROP INDEX "public"."idx_event_coupons_code";
 DROP INDEX "public"."idx_event_coupons_form_id";
 DROP INDEX "public"."idx_event_coupons_retreat_id";
 ALTER TABLE "public"."retreats"
-  ADD COLUMN "spreadsheet_data" jsonb DEFAULT '{}'::jsonb;
+  ADD COLUMN IF NOT EXISTS "spreadsheet_data" jsonb DEFAULT '{}'::jsonb;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
   RETURNS TRIGGER
   LANGUAGE plpgsql
@@ -145,9 +145,10 @@ BEGIN
   WHERE id = p_retreat_id;
 END;
 $function$;
-CREATE INDEX idx_study_notes_media_resource_id ON public.study_notes USING btree (media_resource_id);
-CREATE INDEX idx_study_notes_profile_id ON public.study_notes USING btree (profile_id);
-CREATE INDEX idx_study_notes_study_id ON public.study_notes USING btree (study_id);
+CREATE INDEX IF NOT EXISTS idx_study_notes_media_resource_id ON public.study_notes USING btree (media_resource_id);
+CREATE INDEX IF NOT EXISTS idx_study_notes_profile_id ON public.study_notes USING btree (profile_id);
+CREATE INDEX IF NOT EXISTS idx_study_notes_study_id ON public.study_notes USING btree (study_id);
+DROP EVENT TRIGGER IF EXISTS "ensure_rls";
 CREATE EVENT TRIGGER "ensure_rls"
   ON ddl_command_end
   WHEN TAG IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
