@@ -241,6 +241,7 @@ export type Database = {
           lng: number | null
           location_text: string | null
           meeting_day: number | null
+          nucleus_name: string | null
           sector_id: string | null
           start_time: string | null
         }
@@ -253,6 +254,7 @@ export type Database = {
           lng?: number | null
           location_text?: string | null
           meeting_day?: number | null
+          nucleus_name?: string | null
           sector_id?: string | null
           start_time?: string | null
         }
@@ -265,6 +267,7 @@ export type Database = {
           lng?: number | null
           location_text?: string | null
           meeting_day?: number | null
+          nucleus_name?: string | null
           sector_id?: string | null
           start_time?: string | null
         }
