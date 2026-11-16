@@ -585,15 +585,20 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
       const displayName = getHomeGroupDisplayName(hg, profileMap)
       const loc = hg.location_text ? hg.location_text.split("-")[0].trim() : ""
       const sector = hg.sector_id ? sectorMap.get(hg.sector_id)?.name : undefined
+      const nucleus = hg.nucleus_name?.trim() || ""
 
       list.push({
         value: hg.id,
         label: `${displayName} (${count})`,
-        description: loc
-          ? `${loc} • ${count} ${count === 1 ? "discípulo" : "discípulos"}`
-          : `${count} ${count === 1 ? "discípulo" : "discípulos"}`,
+        description: [
+          nucleus ? `Núcleo: ${nucleus}` : "",
+          loc,
+          `${count} ${count === 1 ? "discípulo" : "discípulos"}`,
+        ]
+          .filter(Boolean)
+          .join(" • "),
         badge: sector,
-        keywords: `${leaders} ${hg.location_text || ""} ${sector || ""}`,
+        keywords: `${leaders} ${nucleus} ${hg.location_text || ""} ${sector || ""}`,
       })
     })
 
@@ -821,7 +826,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                       options={groupFilterOptions}
                       value={selectedGroupFilter}
                       onValueChange={setSelectedGroupFilter}
-                      placeholder="Buscar grupo por líder ou bairro..."
+                      placeholder="Buscar grupo por líder, núcleo ou bairro..."
                       clearable={false}
                     />
                   </div>
@@ -987,6 +992,15 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                             {currentFocusedGroup.start_time ? `às ${currentFocusedGroup.start_time.slice(0, 5)}` : ""}
                           </span>
                         </div>
+
+                        {currentFocusedGroup.nucleus_name && (
+                          <div className={`flex items-center gap-1.5 font-medium min-w-0 ${THEME_CLASSES.subtitle}`}>
+                            <Layers className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="min-w-0 break-words">
+                              Núcleo: {currentFocusedGroup.nucleus_name}
+                            </span>
+                          </div>
+                        )}
 
                         <div className="flex items-center gap-1.5">
                           <MapPin className="h-3.5 w-3.5 text-muted-foreground" />

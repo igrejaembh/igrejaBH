@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { Home, MapPin, Calendar, Clock, ArrowRight, MessageCircle, Phone, Users } from "lucide-react"
+import { Home, MapPin, Calendar, Clock, ArrowRight, MessageCircle, Phone, Users, Layers } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { Database } from "@/lib/database.types"
+import { THEME_CLASSES } from "@/constants/colors"
 
 type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"] & {
   sectors?: Database["public"]["Tables"]["sectors"]["Row"] | null
@@ -164,6 +165,17 @@ export function HomeGroupSideCard({
               </div>
             )}
           </div>
+
+          {/* Nome do Núcleo do Grupo */}
+          {homeGroup.nucleus_name && (
+            <div className={`flex items-start gap-1.5 text-xs ${THEME_CLASSES.subtitle} min-w-0`}>
+              <Layers className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+              <span className="min-w-0 break-words">
+                <span className="font-semibold text-foreground">Núcleo: </span>
+                {homeGroup.nucleus_name}
+              </span>
+            </div>
+          )}
 
           {/* Líderes / Anfitriões */}
           {leaders.length > 0 && (

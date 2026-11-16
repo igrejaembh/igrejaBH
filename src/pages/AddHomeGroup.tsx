@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -58,7 +59,7 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
@@ -110,6 +111,7 @@ export default function AddHomeGroup() {
       meetingDay: 1,
       startTime: "20:00",
       locationText: "",
+      nucleusName: "",
       leader1Id: "",
       leader2Id: null,
       lat: null,
@@ -268,6 +270,7 @@ export default function AddHomeGroup() {
           meeting_day: data.meetingDay,
           start_time: data.startTime,
           location_text: data.locationText,
+          nucleus_name: data.nucleusName?.trim() || null,
           leader_1_id: data.leader1Id,
           leader_2_id: data.leader2Id || null,
           lat: data.lat,
@@ -297,13 +300,13 @@ export default function AddHomeGroup() {
       </div>
 
       <Card className="border-border bg-card/30 backdrop-blur-sm shadow-xl rounded-3xl overflow-hidden">
-        <CardHeader className="space-y-1 p-8">
-          <CardTitle className="text-2xl font-bold">Informações Básicas</CardTitle>
+        <CardHeader className="space-y-1 p-4 sm:p-8">
+          <CardTitle className="text-xl sm:text-2xl font-bold">Informações Básicas</CardTitle>
           <CardDescription>
             Digite o endereço para que possamos localizá-lo no mapa automaticamente.
           </CardDescription>
         </CardHeader>
-        <CardContent className="px-8 pb-8">
+        <CardContent className="px-4 pb-6 sm:px-8 sm:pb-8">
           <form
             id="add-home-group-form"
             onSubmit={form.handleSubmit(onSubmit)}
@@ -463,6 +466,32 @@ export default function AddHomeGroup() {
                 </Dialog>
               </div>
 
+              <Controller
+                name="nucleusName"
+                control={form.control}
+                render={({ field, fieldState }) => (
+                  <Field data-invalid={fieldState.invalid} className="min-w-0">
+                    <FieldLabel htmlFor="nucleusName">
+                      Nome do Núcleo do Grupo
+                    </FieldLabel>
+                    <Input
+                      {...field}
+                      id="nucleusName"
+                      value={field.value ?? ""}
+                      aria-invalid={fieldState.invalid}
+                      placeholder="Ex: Núcleo Castelo / Pampulha"
+                      maxLength={120}
+                      autoComplete="off"
+                      className="bg-background/50 h-11 min-h-[44px] rounded-xl"
+                    />
+                    <FieldDescription>
+                      Identificação regional ou do núcleo ao qual este Grupo Caseiro pertence (opcional).
+                    </FieldDescription>
+                    <FieldError errors={[fieldState.error]} />
+                  </Field>
+                )}
+              />
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
                 <Controller
                   name="meetingDay"
@@ -578,7 +607,7 @@ export default function AddHomeGroup() {
             </FieldGroup>
           </form>
         </CardContent>
-        <CardFooter className="px-8 pb-8 flex flex-col gap-4">
+        <CardFooter className="px-4 pb-6 sm:px-8 sm:pb-8 flex flex-col gap-4">
           <Button
             type="submit"
             form="add-home-group-form"

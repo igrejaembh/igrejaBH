@@ -12,6 +12,7 @@ import {
   Edit,
   Plus,
   Link2,
+  Layers,
 } from "lucide-react"
 import type { Database } from "@/lib/database.types"
 import { THEME_CLASSES } from "@/constants/colors"
@@ -36,6 +37,12 @@ export interface GroupsDirectoryAndMapProps {
   onSelectGroupForMembers?: (groupId: string) => void
   onGenerateGroupLink?: (hg: HomeGroup) => void
 }
+
+const normalizeSearchText = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
 
 const DAYS_OF_WEEK = [
   "Domingo",
@@ -105,17 +112,19 @@ export function GroupsDirectoryAndMap({
 
       // Busca por texto
       if (!searchTerm.trim()) return true
-      const term = searchTerm.toLowerCase()
+      const term = normalizeSearchText(searchTerm.trim())
 
-      const title = getGroupTitle(hg).toLowerCase()
-      const location = (hg.location_text || "").toLowerCase()
-      const l1 = hg.leader_1_id ? (profileMap.get(hg.leader_1_id)?.full_name || "").toLowerCase() : ""
-      const l2 = hg.leader_2_id ? (profileMap.get(hg.leader_2_id)?.full_name || "").toLowerCase() : ""
-      const sectorName = hg.sector_id ? (sectorMap.get(hg.sector_id)?.name || "").toLowerCase() : ""
+      const title = normalizeSearchText(getGroupTitle(hg))
+      const location = normalizeSearchText(hg.location_text || "")
+      const nucleus = normalizeSearchText(hg.nucleus_name || "")
+      const l1 = hg.leader_1_id ? normalizeSearchText(profileMap.get(hg.leader_1_id)?.full_name || "") : ""
+      const l2 = hg.leader_2_id ? normalizeSearchText(profileMap.get(hg.leader_2_id)?.full_name || "") : ""
+      const sectorName = hg.sector_id ? normalizeSearchText(sectorMap.get(hg.sector_id)?.name || "") : ""
 
       return (
         title.includes(term) ||
         location.includes(term) ||
+        nucleus.includes(term) ||
         l1.includes(term) ||
         l2.includes(term) ||
         sectorName.includes(term)
@@ -146,7 +155,7 @@ export function GroupsDirectoryAndMap({
             <Input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar grupo por bairro, líder ou setor..."
+              placeholder="Buscar grupo por bairro, líder, núcleo ou setor..."
               className="h-11 min-h-[44px] rounded-xl pl-10 text-sm"
             />
           </div>
@@ -258,6 +267,14 @@ export function GroupsDirectoryAndMap({
                     <h3 className="font-semibold text-foreground text-base tracking-tight">
                       {getGroupTitle(hg)}
                     </h3>
+                    {hg.nucleus_name && (
+                      <p className={`mt-1 flex items-start gap-1.5 text-xs ${THEME_CLASSES.subtitle} min-w-0`}>
+                        <Layers className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                        <span className="min-w-0 break-words">
+                          Núcleo: <strong className="font-medium text-foreground">{hg.nucleus_name}</strong>
+                        </span>
+                      </p>
+                    )}
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       Líderes: <strong className="text-foreground/90">{getLeadersText(hg)}</strong>
                     </p>

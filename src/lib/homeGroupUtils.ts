@@ -74,5 +74,6 @@ export function getHomeGroupSearchKeywords(
 ): string {
   const leaders = getHomeGroupLeadersName(hg, profileMap)
   const loc = hg.location_text || ""
-  return `${leaders} ${loc} ${extraKeywords || ""}`.toLowerCase()
+  const nucleus = hg.nucleus_name || ""
+  return `${leaders} ${nucleus} ${loc} ${extraKeywords || ""}`.toLowerCase()
 }

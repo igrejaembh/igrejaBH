@@ -200,6 +200,12 @@ export const homeGroupSchema = z.object({
   locationText: z
     .string()
     .min(5, { message: "Endereço deve ter pelo menos 5 caracteres." }),
+  nucleusName: z
+    .string()
+    .trim()
+    .max(120, { message: "Nome do núcleo deve ter no máximo 120 caracteres." })
+    .optional()
+    .nullable(),
   leader1Id: z.string().uuid({ message: "Selecione um líder" }),
   leader2Id: z.string().uuid().optional().nullable(),
   lat: z.number().optional().nullable(),
