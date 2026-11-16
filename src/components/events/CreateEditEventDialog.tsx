@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertTriangle, Info } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
 import { ensureMandatoryEventFields, type FormField } from "@/lib/forms";
+import { GRAPH_UI_CLASSES, THEME_CLASSES } from "@/constants/colors";
+import { isRetreatAutoClosed, isRetreatExpiredByDate } from "@/lib/retreatStatus";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +16,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import { Field, FieldLabel, FieldDescription, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -78,7 +80,7 @@ export function CreateEditEventDialog({
 }: CreateEditEventDialogProps) {
   const [submitting, setSubmitting] = useState(false);
 
-  const { control, handleSubmit, reset, setValue, watch } = useForm<RetreatFormValues>({
+  const { control, handleSubmit, reset, setValue, watch, setError, clearErrors } = useForm<RetreatFormValues>({
     resolver: zodResolver(retreatFormSchema) as Resolver<RetreatFormValues>,
     defaultValues: {
       title: "",
@@ -96,6 +98,19 @@ export function CreateEditEventDialog({
   });
 
   const hasPayment = watch("has_payment");
+  const watchedEndDate = watch("end_date");
+  const watchedStatus = watch("status");
+  const isEndDateInPast = isRetreatExpiredByDate(watchedEndDate);
+  const isAttemptingActivePastRetreat = isEndDateInPast && watchedStatus === "ativo";
+  const isViewingAutoClosed = Boolean(
+    retreat && isRetreatAutoClosed(retreat.status, watchedEndDate || retreat.end_date)
+  );
+
+  useEffect(() => {
+    if (!isAttemptingActivePastRetreat) {
+      clearErrors("status");
+    }
+  }, [isAttemptingActivePastRetreat, clearErrors]);
 
   useEffect(() => {
     if (retreat) {
@@ -134,6 +149,18 @@ export function CreateEditEventDialog({
   }, [retreat, isOpen, setValue, reset]);
 
   const onSubmitEvent = async (data: RetreatFormValues) => {
+    if (data.status === "ativo" && isRetreatExpiredByDate(data.end_date)) {
+      setError("status", {
+        type: "manual",
+        message:
+          "Retiros com data de término no passado encerram automaticamente. Ajuste a data de término ou mantenha como Encerrado.",
+      });
+      toast.warning(
+        "Atualize a data de término para uma data futura antes de manter o retiro ativo."
+      );
+      return;
+    }
+
     setSubmitting(true);
     const payload = {
       title: data.title,
@@ -437,17 +464,52 @@ export function CreateEditEventDialog({
               <Controller
                 name="status"
                 control={control}
-                render={({ field }) => (
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <SelectTrigger id="status" className="w-full min-h-[44px]">
-                      <SelectValue placeholder="Selecione o status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ativo">Ativo (Inscrições Abertas)</SelectItem>
-                      <SelectItem value="rascunho">Rascunho (Privado)</SelectItem>
-                      <SelectItem value="encerrado">Encerrado</SelectItem>
-                    </SelectContent>
-                  </Select>
+                render={({ field, fieldState }) => (
+                  <>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <SelectTrigger
+                        id="status"
+                        aria-invalid={Boolean(fieldState.error)}
+                        className="w-full min-h-[44px]"
+                      >
+                        <SelectValue placeholder="Selecione o status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ativo">Ativo (Inscrições Abertas)</SelectItem>
+                        <SelectItem value="rascunho">Rascunho (Privado)</SelectItem>
+                        <SelectItem value="encerrado">Encerrado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      Retiros ativos passam automaticamente para Encerrado após a data de término.
+                    </FieldDescription>
+                    {isAttemptingActivePastRetreat && (
+                      <div
+                        role="alert"
+                        className={`flex items-start gap-2 rounded-lg border p-3 text-xs leading-relaxed ${GRAPH_UI_CLASSES.inspectorWarningBox}`}
+                      >
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                        <span>
+                          A data de término já passou. Retiros com data de término no passado
+                          encerram automaticamente — atualize a data de término para o futuro ou
+                          selecione &quot;Encerrado&quot;.
+                        </span>
+                      </div>
+                    )}
+                    {!isAttemptingActivePastRetreat && isViewingAutoClosed && (
+                      <div
+                        role="status"
+                        className={`flex items-start gap-2 rounded-lg border p-3 text-xs leading-relaxed ${THEME_CLASSES.surface} text-zinc-600 dark:text-zinc-400`}
+                      >
+                        <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                        <span>
+                          Este retiro foi encerrado automaticamente após o fim da data de término.
+                          Para reativá-lo, informe uma nova data de término futura.
+                        </span>
+                      </div>
+                    )}
+                    {fieldState.error && <FieldError>{fieldState.error.message}</FieldError>}
+                  </>
                 )}
               />
             </Field>

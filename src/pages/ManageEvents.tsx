@@ -1,7 +1,14 @@
 import { useEffect, useState, useMemo } from "react";
-import { Plus, Search, Calendar } from "lucide-react";
+import { Plus, Search, Calendar, Info } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
+import { THEME_CLASSES } from "@/constants/colors";
+import {
+  getEffectiveRetreatStatus,
+  isRetreatAutoClosed,
+  isRetreatExpiredByDate,
+  syncExpiredRetreats,
+} from "@/lib/retreatStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,6 +45,9 @@ export default function ManageEvents() {
   async function fetchData() {
     setLoading(true);
     try {
+      // 0. Sync expired retreats in DB (with client-side fallback if RPC unavailable)
+      const syncResult = await syncExpiredRetreats();
+
       // 1. Fetch retreats with associated forms and registrations
       const { data: retreatsData, error: retreatsError } = await supabase
         .from("retreats")
@@ -63,14 +73,28 @@ export default function ManageEvents() {
         );
         const count = activeRegistrations.length;
         counts[r.id] = count;
+        const effectiveStatus = syncResult.usedFallback
+          ? getEffectiveRetreatStatus(r.status, r.end_date)
+          : r.status;
         return {
           ...r,
+          status: effectiveStatus,
           registrations_count: count,
         };
       });
 
       setRetreats(formattedRetreats);
       setRegistrationCounts(counts);
+
+      if (syncResult.closedCount > 0) {
+        toast.info(
+          `${syncResult.closedCount} ${
+            syncResult.closedCount === 1
+              ? "retiro com data encerrada foi fechado"
+              : "retiros com data encerrada foram fechados"
+          } automaticamente.`
+        );
+      }
 
       // 2. Fetch available forms for event creation
       const { data: formsData, error: formsError } = await supabase
@@ -134,6 +158,16 @@ export default function ManageEvents() {
   };
 
   const handleActivateClick = async (retreatId: string) => {
+    const targetRetreat = retreats.find((r) => r.id === retreatId);
+    if (targetRetreat && isRetreatExpiredByDate(targetRetreat.end_date)) {
+      toast.warning(
+        "Este retiro possui data de término no passado e encerra automaticamente. Atualize a data de término antes de ativar."
+      );
+      setEditingRetreat(targetRetreat);
+      setIsDialogOpen(true);
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from("retreats")
@@ -177,6 +211,11 @@ export default function ManageEvents() {
     const ended = retreats.filter((r) => r.status === "encerrado").length;
     return { total, active, draft, ended };
   }, [retreats]);
+
+  const autoClosedCount = useMemo(
+    () => retreats.filter((r) => isRetreatAutoClosed(r.status, r.end_date)).length,
+    [retreats]
+  );
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
@@ -257,6 +296,22 @@ export default function ManageEvents() {
           />
         </div>
       </div>
+
+      {!loading &&
+        autoClosedCount > 0 &&
+        (statusFilter === "todos" || statusFilter === "encerrado") && (
+          <div
+            role="status"
+            className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-xs ${THEME_CLASSES.surface} text-zinc-600 dark:text-zinc-400`}
+          >
+            <Info className="h-4 w-4 shrink-0 mt-0.5 text-zinc-500 dark:text-zinc-400" />
+            <p className="leading-relaxed">
+              Retiros ativos com data de término encerrada passam automaticamente para{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">Encerrado</span>{" "}
+              após o fim do evento.
+            </p>
+          </div>
+        )}
 
       {/* Grid-based Content Area */}
       {loading ? (

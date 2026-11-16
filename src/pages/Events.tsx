@@ -54,6 +54,7 @@ import {
 import type { FormField } from "@/lib/forms"
 import type { Database } from "@/lib/database.types"
 import { formatDateBR } from "@/lib/utils"
+import { getEffectiveRetreatStatus, syncExpiredRetreats } from "@/lib/retreatStatus"
 import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { EventWaitlistDialog } from "@/components/events/EventWaitlistDialog"
 
@@ -200,17 +201,25 @@ export default function Events() {
         })
       }
 
-      // 2. Fetch active retreats
+      // 2. Sync expired retreats in DB (with client-side fallback if RPC unavailable)
+      await syncExpiredRetreats()
+
+      // 2.1 Fetch active retreats
       const { data: eventsData, error: eventsErr } = await supabase
         .from("retreats")
         .select("*")
         .eq("status", "ativo")
         .order("start_date", { ascending: true })
       if (eventsErr) throw eventsErr
-      setRetreats(eventsData || [])
 
-      // 2.1 Fetch registration counts to verify capacity
-      const activeIds = (eventsData || []).map((r) => r.id)
+      const activeEvents = (eventsData || []).filter(
+        (retreat) =>
+          getEffectiveRetreatStatus(retreat.status, retreat.end_date) === "ativo"
+      )
+      setRetreats(activeEvents)
+
+      // 2.2 Fetch registration counts to verify capacity
+      const activeIds = activeEvents.map((r) => r.id)
       if (activeIds.length > 0) {
         const { data: countList } = await supabase
           .from("registrations")
