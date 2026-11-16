@@ -1055,6 +1055,10 @@ export type Database = {
           profile_id: string
         }[]
       }
+      close_expired_retreats: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
       patch_retreat_sheet_metadata: {
         Args: { p_metadata: Json; p_retreat_id: string; p_sheet_name: string }
         Returns: undefined
