@@ -52,10 +52,11 @@ import {
   calculateTotalPrice,
 } from "@/lib/forms"
 import type { FormField } from "@/lib/forms"
-import type { Database } from "@/lib/database.types"
+import type { Database, Json } from "@/lib/database.types"
 import { formatDateBR } from "@/lib/utils"
 import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { EventWaitlistDialog } from "@/components/events/EventWaitlistDialog"
+import { ParticipantQrBadgeDialog } from "@/components/events/ParticipantQrBadge"
 
 type Retreat = Database["public"]["Tables"]["retreats"]["Row"]
 
@@ -103,7 +104,7 @@ export default function Events() {
   const [guestErrors, setGuestErrors] = useState<Record<string, string>>({})
 
   // Step 2 Form Data (Dynamic Form Responses)
-  const [customResponses, setCustomResponses] = useState<Record<string, any>>(
+  const [customResponses, setCustomResponses] = useState<Record<string, Json>>(
     {}
   )
   const [customFormFields, setCustomFormFields] = useState<FormField[]>([])
@@ -125,6 +126,9 @@ export default function Events() {
   const [cancellingRegistration, setCancellingRegistration] = useState<Registration | null>(null)
   const [cancellationReason, setCancellationReason] = useState("")
   const [isSubmittingCancellation, setIsSubmittingCancellation] = useState(false)
+
+  // Digital QR Badge Dialog State
+  const [badgeDialogRegistration, setBadgeDialogRegistration] = useState<Registration | null>(null)
 
   const handleOpenCancelDialog = (reg: Registration) => {
     setCancellingRegistration(reg)
@@ -282,7 +286,7 @@ export default function Events() {
         setCustomFormFields(fields)
 
         // Initialize responses structure
-        const initialResponses: Record<string, any> = {}
+        const initialResponses: Record<string, Json> = {}
         fields.forEach((f) => {
           initialResponses[f.id] = f.type === "checkbox" ? [] : ""
         })
@@ -371,7 +375,7 @@ export default function Events() {
       // Required check
       if (field.required) {
         if (field.type === "checkbox") {
-          if (!val || val.length === 0) {
+          if (!Array.isArray(val) || val.length === 0) {
             errors[field.id] = `${field.label} é obrigatório.`
           }
         } else if (typeof val === "string" && !val.trim()) {
@@ -458,7 +462,7 @@ export default function Events() {
 
           formSubmissionId = `sub-${Math.random().toString(36).substring(7)}`
 
-          const filteredData: Record<string, any> = {}
+          const filteredData: Record<string, Json> = {}
           customFormFields.forEach((field) => {
             if (
               isFieldVisible(field, customResponses, customFormFields) &&
@@ -479,7 +483,7 @@ export default function Events() {
         }
 
         // Map custom responses field IDs to their labels for easy display
-        const mappedResponses: Record<string, any> = {}
+        const mappedResponses: Record<string, Json> = {}
         customFormFields.forEach((field) => {
           if (isFieldVisible(field, customResponses, customFormFields)) {
             mappedResponses[field.label] = customResponses[field.id]
@@ -856,7 +860,7 @@ export default function Events() {
                         {field.type === "text" && (
                           <Input
                             id={field.id}
-                            value={customResponses[field.id] || ""}
+                            value={typeof customResponses[field.id] === "string" || typeof customResponses[field.id] === "number" ? String(customResponses[field.id]) : ""}
                             onChange={(e) => {
                               const val = e.target.value
                               if (field.validationPreset === "cep") {
@@ -878,7 +882,7 @@ export default function Events() {
                         {field.type === "textarea" && (
                           <Textarea
                             id={field.id}
-                            value={customResponses[field.id] || ""}
+                            value={typeof customResponses[field.id] === "string" || typeof customResponses[field.id] === "number" ? String(customResponses[field.id]) : ""}
                             onChange={(e) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -894,7 +898,7 @@ export default function Events() {
                           <Input
                             id={field.id}
                             type="number"
-                            value={customResponses[field.id] || ""}
+                            value={typeof customResponses[field.id] === "string" || typeof customResponses[field.id] === "number" ? String(customResponses[field.id]) : ""}
                             onChange={(e) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -912,7 +916,7 @@ export default function Events() {
                           <Input
                             id={field.id}
                             type="date"
-                            value={customResponses[field.id] || ""}
+                            value={typeof customResponses[field.id] === "string" ? (customResponses[field.id] as string) : ""}
                             onChange={(e) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -924,7 +928,7 @@ export default function Events() {
 
                         {field.type === "select" && (
                           <Select
-                            value={customResponses[field.id] || "none"}
+                            value={typeof customResponses[field.id] === "string" && customResponses[field.id] ? (customResponses[field.id] as string) : "none"}
                             onValueChange={(val) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -948,7 +952,7 @@ export default function Events() {
 
                         {field.type === "radio" && (
                           <RadioGroup
-                            value={customResponses[field.id] || ""}
+                            value={typeof customResponses[field.id] === "string" ? (customResponses[field.id] as string) : ""}
                             onValueChange={(val) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -974,8 +978,10 @@ export default function Events() {
                         {field.type === "checkbox" && (
                           <div className="mt-2 flex flex-col gap-2.5">
                             {field.options.map((opt) => {
-                              const checkedList =
-                                customResponses[field.id] || []
+                              const rawList = customResponses[field.id]
+                              const checkedList = Array.isArray(rawList)
+                                ? rawList.filter((item): item is string => typeof item === "string")
+                                : []
                               const isChecked = checkedList.includes(opt)
                               return (
                                 <div key={opt} className="flex items-center gap-2">
@@ -1361,15 +1367,27 @@ export default function Events() {
                       )}
                     </div>
                     {!isCancelled && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenCancelDialog(reg)}
-                        className="min-h-[44px] h-9 px-3 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-500/10 dark:text-red-400 cursor-pointer self-end sm:self-auto shrink-0"
-                      >
-                        Cancelar Inscrição
-                      </Button>
+                      <div className="flex flex-wrap items-center justify-end gap-2 self-end sm:self-auto shrink-0">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setBadgeDialogRegistration(reg)}
+                          className="min-h-[44px] h-11 px-3 text-xs font-semibold cursor-pointer"
+                        >
+                          <QrCode className="h-4 w-4 mr-1.5" />
+                          <span>Meu Crachá</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleOpenCancelDialog(reg)}
+                          className="min-h-[44px] h-11 px-3 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-500/10 dark:text-red-400 cursor-pointer"
+                        >
+                          Cancelar Inscrição
+                        </Button>
+                      </div>
                     )}
                   </CardFooter>
                 </Card>
@@ -1575,6 +1593,19 @@ export default function Events() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal Dialog para Crachá Digital com QR Code */}
+      <ParticipantQrBadgeDialog
+        isOpen={!!badgeDialogRegistration}
+        onClose={() => setBadgeDialogRegistration(null)}
+        registration={badgeDialogRegistration}
+        participantName={
+          (badgeDialogRegistration?.guest_data as { full_name?: string } | null)
+            ?.full_name ||
+          userProfile?.full_name ||
+          "Discípulo"
+        }
+      />
 
       {/* Modal Dialog para Inscrição na Lista de Espera */}
       <EventWaitlistDialog

@@ -27,6 +27,11 @@ import {
 } from "@/components/ui/select";
 import type { Resolver } from "react-hook-form";
 import type { Database, Json } from "@/lib/database.types";
+import { CheckinChecklistConfigEditor } from "@/components/events/CheckinChecklistConfigEditor";
+import {
+  DEFAULT_CHECKIN_CHECKLIST,
+  parseChecklistConfig,
+} from "@/lib/checkinFlags";
 
 type Retreat = Database["public"]["Tables"]["retreats"]["Row"];
 
@@ -50,6 +55,14 @@ const retreatFormSchema = z.object({
   status: z.enum(["ativo", "rascunho", "encerrado"] as const),
   form_id: z.string().optional().nullable(),
   registration_deadline: z.string().optional().nullable(),
+  checkin_checklist_config: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        label: z.string().min(1),
+      })
+    )
+    .default(DEFAULT_CHECKIN_CHECKLIST),
 });
 
 type RetreatFormValues = z.infer<typeof retreatFormSchema>;
@@ -92,6 +105,7 @@ export function CreateEditEventDialog({
       status: "ativo",
       form_id: "",
       registration_deadline: "",
+      checkin_checklist_config: [...DEFAULT_CHECKIN_CHECKLIST],
     },
   });
 
@@ -116,6 +130,10 @@ export function CreateEditEventDialog({
       );
       setValue("form_id", retreat.form_id || "");
       setValue("registration_deadline", retreat.registration_deadline || "");
+      setValue(
+        "checkin_checklist_config",
+        parseChecklistConfig(retreat.checkin_checklist_config)
+      );
     } else {
       reset({
         title: "",
@@ -129,6 +147,7 @@ export function CreateEditEventDialog({
         status: "ativo",
         form_id: "",
         registration_deadline: "",
+        checkin_checklist_config: [...DEFAULT_CHECKIN_CHECKLIST],
       });
     }
   }, [retreat, isOpen, setValue, reset]);
@@ -148,6 +167,7 @@ export function CreateEditEventDialog({
       form_id: data.form_id === "" ? null : data.form_id,
       registration_deadline:
         data.registration_deadline === "" ? null : data.registration_deadline,
+      checkin_checklist_config: data.checkin_checklist_config as unknown as Json,
     };
 
     // Validação preventiva: exclusividade 1-para-1 de formulário por evento
@@ -498,6 +518,19 @@ export function CreateEditEventDialog({
               />
             </Field>
           </div>
+
+          <Controller
+            name="checkin_checklist_config"
+            control={control}
+            render={({ field }) => (
+              <CheckinChecklistConfigEditor
+                value={field.value}
+                onChange={field.onChange}
+                disabled={submitting}
+                inputId="create-edit-checklist-input"
+              />
+            )}
+          />
 
           <DialogFooter className="pt-4 flex flex-col sm:flex-row gap-2">
             <Button

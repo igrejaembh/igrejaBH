@@ -60,7 +60,8 @@ import {
 } from "@/components/events/EventFinanceTab";
 import { EventTeamsTab } from "@/components/events/EventTeamsTab";
 import { getServiceTeam } from "@/constants/serviceTeams";
-import type { Database } from "@/lib/database.types";
+import type { Database, Json } from "@/lib/database.types";
+import { parseChecklistConfig, type CheckinFlagsMap } from "@/lib/checkinFlags";
 import type { FilterRule, FilterLogic, KPIConfig } from "@/types/eventsFilter";
 import {
   DEFAULT_KPI_CONFIGS,
@@ -701,6 +702,42 @@ export default function ManageEventDetail() {
         err instanceof Error
           ? err.message
           : "Erro ao atualizar equipe de serviço";
+      toast.error(msg);
+      throw err;
+    }
+  };
+
+  // Update Check-in Control Flags for a Registration
+  const handleUpdateCheckinFlags = async (
+    regId: string,
+    flags: CheckinFlagsMap
+  ) => {
+    try {
+      const { error } = await supabase
+        .from("registrations")
+        .update({ checkin_flags: flags as unknown as Json })
+        .eq("id", regId);
+
+      if (error) throw error;
+
+      setRegistrations((prev) =>
+        prev.map((item) =>
+          item.id === regId
+            ? { ...item, checkin_flags: flags as unknown as Json }
+            : item
+        )
+      );
+
+      if (selectedRegistrationForDetail?.id === regId) {
+        setSelectedRegistrationForDetail((prev) =>
+          prev ? { ...prev, checkin_flags: flags as unknown as Json } : null
+        );
+      }
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Erro ao atualizar checklist de portaria";
       toast.error(msg);
       throw err;
     }
@@ -1427,8 +1464,13 @@ export default function ManageEventDetail() {
         <EventCheckInTab
           retreatId={retreat.id}
           retreatTitle={retreat.title}
+          retreatStartDate={retreat.start_date}
+          retreatEndDate={retreat.end_date}
+          retreatLocation={retreat.location_text}
           registrations={registrations}
           retreatRooms={retreatRooms}
+          checklistConfig={parseChecklistConfig(retreat.checkin_checklist_config)}
+          homeGroupsMap={homeGroupsMap}
           onUpdateRegistration={(updatedReg) => {
             setRegistrations((prev) =>
               prev.map((r) => (r.id === updatedReg.id ? updatedReg : r))
@@ -1438,6 +1480,17 @@ export default function ManageEventDetail() {
             if (eventId) fetchRegistrations(eventId);
           }}
           onViewDetails={(reg) => setSelectedRegistrationForDetail(reg)}
+          onChecklistConfigUpdated={(nextConfig) => {
+            setRetreat((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    checkin_checklist_config: nextConfig as unknown as Json,
+                  }
+                : null
+            );
+          }}
+          onUpdateCheckinFlags={handleUpdateCheckinFlags}
         />
       )}
 
@@ -1806,6 +1859,8 @@ export default function ManageEventDetail() {
         onUpdateServiceTeam={handleUpdateServiceTeam}
         onUpdateStatus={handleUpdateRegistrationStatus}
         availableSpots={availableSpots}
+        checklistConfig={parseChecklistConfig(retreat.checkin_checklist_config)}
+        onUpdateCheckinFlags={handleUpdateCheckinFlags}
       />
 
       {/* Modal: Editar Evento */}
