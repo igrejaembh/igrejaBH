@@ -164,23 +164,85 @@ export const signUpSchema = z
   })
 export type SignUpValue = z.infer<typeof signUpSchema>
 
-export const visitorSignUpSchema = z
-  .object({
-    fullName: z
-      .string()
-      .trim()
-      .min(3, { message: "Nome completo deve ter pelo menos 3 caracteres." }),
-    email: z.string().trim().email({ message: "E-mail inválido." }),
-    phone: z
-      .string()
-      .refine(
-        (val) => val === "" || isValidBrazilianPhone(val),
-        {
-          message: "Telefone inválido. Informe um número com DDD (ex: (31) 98888-7777).",
-        }
+const optionalBirthDateSchema = z
+  .string()
+  .refine(
+    (val) => {
+      if (!val || val.trim() === "") return true
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return false
+      const [y, m, d] = val.split("-").map(Number)
+      const parsed = new Date(Date.UTC(y, m - 1, d))
+      return (
+        parsed.getUTCFullYear() === y &&
+        parsed.getUTCMonth() === m - 1 &&
+        parsed.getUTCDate() === d
       )
-      .optional()
-      .or(z.literal("")),
+    },
+    { message: "Data de nascimento inválida (AAAA-MM-DD)." }
+  )
+  .optional()
+  .or(z.literal(""))
+
+const optionalCpfSchema = z
+  .string()
+  .refine((val) => !val || val.trim() === "" || validateCPF(val), {
+    message: "CPF inválido.",
+  })
+  .optional()
+  .or(z.literal(""))
+
+const optionalPhoneSchema = z
+  .string()
+  .refine((val) => val === "" || isValidBrazilianPhone(val), {
+    message:
+      "Telefone inválido. Informe um número com DDD (ex: (31) 98888-7777).",
+  })
+  .optional()
+  .or(z.literal(""))
+
+export const retreatParticipantBaseSchema = z.object({
+  fullName: z
+    .string()
+    .trim()
+    .min(3, { message: "Nome completo deve ter pelo menos 3 caracteres." }),
+  phone: optionalPhoneSchema,
+  cpf: optionalCpfSchema,
+  birthDate: optionalBirthDateSchema,
+  gender: z
+    .enum(["masculino", "feminino", "outro"] as const)
+    .optional()
+    .or(z.literal("")),
+  cityState: z
+    .string()
+    .trim()
+    .max(120, { message: "Cidade / Estado deve ter no máximo 120 caracteres." })
+    .optional()
+    .or(z.literal("")),
+  dietaryRestrictions: z
+    .string()
+    .trim()
+    .max(500, {
+      message: "Restrições alimentares devem ter no máximo 500 caracteres.",
+    })
+    .optional()
+    .or(z.literal("")),
+  emergencyContact: z
+    .string()
+    .trim()
+    .max(160, {
+      message: "Contato de emergência deve ter no máximo 160 caracteres.",
+    })
+    .optional()
+    .or(z.literal("")),
+})
+
+export type RetreatParticipantProfileValue = z.infer<
+  typeof retreatParticipantBaseSchema
+>
+
+export const visitorSignUpSchema = retreatParticipantBaseSchema
+  .extend({
+    email: z.string().trim().email({ message: "E-mail inválido." }),
     password: passwordSchema,
     confirmPassword: z
       .string()

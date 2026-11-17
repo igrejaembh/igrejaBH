@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import supabase from "@/lib/supabase"
 import {
   Calendar,
@@ -52,8 +52,16 @@ import {
   calculateTotalPrice,
 } from "@/lib/forms"
 import type { FormField } from "@/lib/forms"
-import type { Database } from "@/lib/database.types"
+import type { Database, Json } from "@/lib/database.types"
 import { formatDateBR } from "@/lib/utils"
+import { formatCPF } from "@/lib/cpfUtils"
+import {
+  normalizeNationalPhoneForForm,
+  resolveProfileCityState,
+  toEventGenderLabel,
+} from "@/lib/participantProfile"
+import { invalidateCurrentUserProfileCache } from "@/hooks/useCurrentUserProfile"
+import { FieldGroup } from "@/components/ui/field"
 import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { EventWaitlistDialog } from "@/components/events/EventWaitlistDialog"
 
@@ -63,14 +71,21 @@ type Registration = Database["public"]["Tables"]["registrations"]["Row"] & {
   retreats: Retreat | null
 }
 
-interface Profile {
-  id: string
-  full_name: string
-  email: string | null
-  phone: string | null
-  cpf: string | null
-  birth_date: string | null
-}
+type Profile = Pick<
+  Database["public"]["Tables"]["profiles"]["Row"],
+  | "id"
+  | "full_name"
+  | "email"
+  | "phone"
+  | "cpf"
+  | "birth_date"
+  | "gender"
+  | "city_state"
+  | "address_city"
+  | "address_state"
+  | "dietary_restrictions"
+  | "emergency_contact"
+>
 
 export default function Events() {
   const [retreats, setRetreats] = useState<Retreat[]>([])
@@ -97,13 +112,15 @@ export default function Events() {
     phone: "",
     cpf: "",
     birthDate: "",
-    gender: "Masculino",
+    gender: "",
     cityState: "",
   })
   const [guestErrors, setGuestErrors] = useState<Record<string, string>>({})
+  const [saveMissingToProfile, setSaveMissingToProfile] = useState(true)
 
   // Step 2 Form Data (Dynamic Form Responses)
-  const [customResponses, setCustomResponses] = useState<Record<string, any>>(
+  type CustomResponseValue = string | number | string[]
+  const [customResponses, setCustomResponses] = useState<Record<string, CustomResponseValue>>(
     {}
   )
   const [customFormFields, setCustomFormFields] = useState<FormField[]>([])
@@ -158,21 +175,34 @@ export default function Events() {
     }
   }
 
-  useEffect(() => {
-    fetchInitialData()
-  }, [])
+  const applyProfilePrefill = useCallback(
+    (profile: Profile, fallbackEmail?: string | null) => {
+      setGuestData({
+        fullName: profile.full_name || "",
+        email: profile.email || fallbackEmail || "",
+        phone: normalizeNationalPhoneForForm(profile.phone),
+        cpf: profile.cpf ? formatValue(profile.cpf, "cpf") : "",
+        birthDate: profile.birth_date || "",
+        gender: toEventGenderLabel(profile.gender),
+        cityState: resolveProfileCityState(profile),
+      })
+      setNotes(profile.dietary_restrictions || "")
+      setGuestErrors({})
+      setFormErrors({})
+      setSaveMissingToProfile(true)
+    },
+    []
+  )
 
-  // Fetch custom form fields when registeringRetreat changes
-  useEffect(() => {
-    if (registeringRetreat && registeringRetreat.form_id) {
-      fetchCustomForm(registeringRetreat.form_id)
-    } else {
-      setCustomFormFields([])
-      setCustomResponses({})
+  function handleStartRegistration(retreat: Retreat) {
+    if (userProfile) {
+      applyProfilePrefill(userProfile, userProfile.email)
     }
-  }, [registeringRetreat])
+    setActiveStep(1)
+    setRegisteringRetreat(retreat)
+  }
 
-  async function fetchInitialData() {
+  const fetchInitialData = useCallback(async () => {
     setLoading(true)
     try {
       const {
@@ -183,21 +213,15 @@ export default function Events() {
       // 1. Fetch user profile
       const { data: profile } = await supabase
         .from("profiles")
-        .select("id, full_name, email, phone, cpf, birth_date")
+        .select(
+          "id, full_name, email, phone, cpf, birth_date, gender, city_state, address_city, address_state, dietary_restrictions, emergency_contact"
+        )
         .eq("user_id", session.user.id)
         .single()
 
       if (profile) {
         setUserProfile(profile)
-        setGuestData({
-          fullName: profile.full_name || "",
-          email: profile.email || "",
-          phone: profile.phone || "",
-          cpf: profile.cpf || "",
-          birthDate: profile.birth_date || "",
-          gender: "Masculino",
-          cityState: "",
-        })
+        applyProfilePrefill(profile, session.user.email)
       }
 
       // 2. Fetch active retreats
@@ -265,38 +289,81 @@ export default function Events() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [applyProfilePrefill])
 
-  async function fetchCustomForm(formId: string) {
-    setLoadingForm(true)
-    try {
-      const { data, error } = await supabase
-        .from("forms")
-        .select("fields")
-        .eq("id", formId)
-        .single()
+  const fetchCustomForm = useCallback(
+    async (formId: string, profileForPrefill: Profile | null) => {
+      setLoadingForm(true)
+      try {
+        const { data, error } = await supabase
+          .from("forms")
+          .select("fields")
+          .eq("id", formId)
+          .single()
 
-      if (error) throw error
-      if (data && data.fields) {
-        const fields = data.fields as unknown as FormField[]
-        setCustomFormFields(fields)
+        if (error) throw error
+        if (data && data.fields) {
+          const fields = data.fields as unknown as FormField[]
+          setCustomFormFields(fields)
 
-        // Initialize responses structure
-        const initialResponses: Record<string, any> = {}
-        fields.forEach((f) => {
-          initialResponses[f.id] = f.type === "checkbox" ? [] : ""
-        })
-        setCustomResponses(initialResponses)
+          // Initialize responses structure with saved profile hints when available
+          const initialResponses: Record<string, CustomResponseValue> = {}
+          fields.forEach((f) => {
+            if (f.type === "checkbox") {
+              initialResponses[f.id] = []
+              return
+            }
+            const fid = f.id.toLowerCase()
+            const label = f.label.toLowerCase()
+            if (
+              profileForPrefill?.dietary_restrictions &&
+              (fid.includes("restric") ||
+                fid.includes("alerg") ||
+                fid.includes("diet") ||
+                label.includes("restriç") ||
+                label.includes("restric") ||
+                label.includes("alergia") ||
+                label.includes("alimentar"))
+            ) {
+              initialResponses[f.id] = profileForPrefill.dietary_restrictions
+            } else if (
+              profileForPrefill?.emergency_contact &&
+              (fid.includes("emergen") ||
+                label.includes("emergência") ||
+                label.includes("emergencia"))
+            ) {
+              initialResponses[f.id] = profileForPrefill.emergency_contact
+            } else {
+              initialResponses[f.id] = ""
+            }
+          })
+          setCustomResponses(initialResponses)
+        }
+      } catch (err: unknown) {
+        console.error("Erro ao buscar formulário customizado:", err)
+        toast.error(
+          "Não foi possível carregar a ficha de inscrição complementar."
+        )
+      } finally {
+        setLoadingForm(false)
       }
-    } catch (err: unknown) {
-      console.error("Erro ao buscar formulário customizado:", err)
-      toast.error(
-        "Não foi possível carregar a ficha de inscrição complementar."
-      )
-    } finally {
-      setLoadingForm(false)
+    },
+    []
+  )
+
+  useEffect(() => {
+    fetchInitialData()
+  }, [fetchInitialData])
+
+  // Fetch custom form fields when registeringRetreat changes
+  useEffect(() => {
+    if (registeringRetreat && registeringRetreat.form_id) {
+      fetchCustomForm(registeringRetreat.form_id, userProfile)
+    } else {
+      setCustomFormFields([])
+      setCustomResponses({})
     }
-  }
+  }, [registeringRetreat, fetchCustomForm, userProfile])
 
   // Real-time CEP filler inside the custom form
   const handleCepChange = async (field: FormField, val: string) => {
@@ -371,7 +438,7 @@ export default function Events() {
       // Required check
       if (field.required) {
         if (field.type === "checkbox") {
-          if (!val || val.length === 0) {
+          if (!Array.isArray(val) || val.length === 0) {
             errors[field.id] = `${field.label} é obrigatório.`
           }
         } else if (typeof val === "string" && !val.trim()) {
@@ -458,7 +525,7 @@ export default function Events() {
 
           formSubmissionId = `sub-${Math.random().toString(36).substring(7)}`
 
-          const filteredData: Record<string, any> = {}
+          const filteredData: Record<string, Json> = {}
           customFormFields.forEach((field) => {
             if (
               isFieldVisible(field, customResponses, customFormFields) &&
@@ -479,10 +546,10 @@ export default function Events() {
         }
 
         // Map custom responses field IDs to their labels for easy display
-        const mappedResponses: Record<string, any> = {}
+        const mappedResponses: Record<string, Json> = {}
         customFormFields.forEach((field) => {
           if (isFieldVisible(field, customResponses, customFormFields)) {
-            mappedResponses[field.label] = customResponses[field.id]
+            mappedResponses[field.label] = customResponses[field.id] ?? ""
           }
         })
 
@@ -502,6 +569,44 @@ export default function Events() {
         const { error } = await supabase.from("registrations").insert([payload])
 
         if (error) throw error
+
+        if (saveMissingToProfile) {
+          const profileUpdates: Record<string, string> = {}
+          if (!userProfile.phone && guestData.phone.trim()) {
+            profileUpdates.phone = guestData.phone.trim()
+          }
+          if (!userProfile.cpf && guestData.cpf.trim()) {
+            profileUpdates.cpf = formatCPF(guestData.cpf)
+          }
+          if (!userProfile.birth_date && guestData.birthDate) {
+            profileUpdates.birth_date = guestData.birthDate
+          }
+          if (!userProfile.gender && guestData.gender) {
+            profileUpdates.gender = guestData.gender.toLowerCase()
+          }
+          if (!resolveProfileCityState(userProfile) && guestData.cityState.trim()) {
+            profileUpdates.city_state = guestData.cityState.trim()
+          }
+          if (!userProfile.dietary_restrictions && notes.trim()) {
+            profileUpdates.dietary_restrictions = notes.trim()
+          }
+
+          if (Object.keys(profileUpdates).length > 0) {
+            try {
+              const { error: profUpdateErr } = await supabase
+                .from("profiles")
+                .update(profileUpdates)
+                .eq("id", userProfile.id)
+              if (profUpdateErr) {
+                console.warn("Não foi possível atualizar os dados no perfil:", profUpdateErr.message)
+              } else {
+                await invalidateCurrentUserProfileCache()
+              }
+            } catch (profErr) {
+              console.warn("Falha ao atualizar perfil após inscrição:", profErr)
+            }
+          }
+        }
 
         toast.success(paid ? "Inscrição efetuada e paga com sucesso!" : "Inscrição efetuada com sucesso!")
         setRegisteringRetreat(null)
@@ -664,143 +769,180 @@ export default function Events() {
                   Dados Básicos do Inscrito
                 </h3>
 
-                <Field>
-                  <FieldLabel htmlFor="fullName">Nome Completo *</FieldLabel>
-                  <Input
-                    id="fullName"
-                    value={guestData.fullName}
-                    onChange={(e) =>
-                      setGuestData((prev) => ({
-                        ...prev,
-                        fullName: e.target.value,
-                      }))
-                    }
-                    placeholder="Seu nome completo"
-                  />
-                  {guestErrors.fullName && (
-                    <FieldError>{guestErrors.fullName}</FieldError>
-                  )}
-                </Field>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="email">E-mail *</FieldLabel>
+                <FieldGroup>
+                  <Field data-invalid={!!guestErrors.fullName}>
+                    <FieldLabel htmlFor="fullName">Nome Completo *</FieldLabel>
                     <Input
-                      id="email"
-                      type="email"
-                      value={guestData.email}
+                      id="fullName"
+                      value={guestData.fullName}
+                      aria-invalid={!!guestErrors.fullName}
                       onChange={(e) =>
                         setGuestData((prev) => ({
                           ...prev,
-                          email: e.target.value,
+                          fullName: e.target.value,
                         }))
                       }
-                      placeholder="seuemail@provedor.com"
+                      placeholder="Seu nome completo"
+                      className="min-h-[44px]"
                     />
-                    {guestErrors.email && (
-                      <FieldError>{guestErrors.email}</FieldError>
+                    {guestErrors.fullName && (
+                      <FieldError>{guestErrors.fullName}</FieldError>
                     )}
                   </Field>
 
-                  <Field>
-                    <FieldLabel htmlFor="phone">Celular *</FieldLabel>
-                    <Input
-                      id="phone"
-                      value={guestData.phone}
-                      onChange={(e) =>
-                        setGuestData((prev) => ({
-                          ...prev,
-                          phone: formatValue(e.target.value, "phone"),
-                        }))
-                      }
-                      placeholder="(31) 99999-9999"
-                    />
-                    {guestErrors.phone && (
-                      <FieldError>{guestErrors.phone}</FieldError>
-                    )}
-                  </Field>
-                </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <Field data-invalid={!!guestErrors.email}>
+                      <FieldLabel htmlFor="email">E-mail *</FieldLabel>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={guestData.email}
+                        aria-invalid={!!guestErrors.email}
+                        onChange={(e) =>
+                          setGuestData((prev) => ({
+                            ...prev,
+                            email: e.target.value,
+                          }))
+                        }
+                        placeholder="seuemail@provedor.com"
+                        className="min-h-[44px]"
+                      />
+                      {guestErrors.email && (
+                        <FieldError>{guestErrors.email}</FieldError>
+                      )}
+                    </Field>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="cpf">CPF *</FieldLabel>
-                    <Input
-                      id="cpf"
-                      value={guestData.cpf}
-                      onChange={(e) =>
-                        setGuestData((prev) => ({
-                          ...prev,
-                          cpf: formatValue(e.target.value, "cpf"),
-                        }))
-                      }
-                      placeholder="000.000.000-00"
-                    />
-                    {guestErrors.cpf && (
-                      <FieldError>{guestErrors.cpf}</FieldError>
-                    )}
-                  </Field>
+                    <Field data-invalid={!!guestErrors.phone}>
+                      <FieldLabel htmlFor="phone">Celular *</FieldLabel>
+                      <Input
+                        id="phone"
+                        value={guestData.phone}
+                        aria-invalid={!!guestErrors.phone}
+                        onChange={(e) =>
+                          setGuestData((prev) => ({
+                            ...prev,
+                            phone: formatValue(e.target.value, "phone"),
+                          }))
+                        }
+                        placeholder="(31) 99999-9999"
+                        className="min-h-[44px]"
+                      />
+                      {guestErrors.phone && (
+                        <FieldError>{guestErrors.phone}</FieldError>
+                      )}
+                    </Field>
+                  </div>
 
-                  <Field>
-                    <FieldLabel htmlFor="birthDate">
-                      Data de Nascimento *
-                    </FieldLabel>
-                    <Input
-                      id="birthDate"
-                      type="date"
-                      value={guestData.birthDate}
-                      onChange={(e) =>
-                        setGuestData((prev) => ({
-                          ...prev,
-                          birthDate: e.target.value,
-                        }))
-                      }
-                    />
-                    {guestErrors.birthDate && (
-                      <FieldError>{guestErrors.birthDate}</FieldError>
-                    )}
-                  </Field>
-                </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <Field data-invalid={!!guestErrors.cpf}>
+                      <FieldLabel htmlFor="cpf">CPF *</FieldLabel>
+                      <Input
+                        id="cpf"
+                        value={guestData.cpf}
+                        aria-invalid={!!guestErrors.cpf}
+                        onChange={(e) =>
+                          setGuestData((prev) => ({
+                            ...prev,
+                            cpf: formatValue(e.target.value, "cpf"),
+                          }))
+                        }
+                        placeholder="000.000.000-00"
+                        className="min-h-[44px]"
+                      />
+                      {guestErrors.cpf && (
+                        <FieldError>{guestErrors.cpf}</FieldError>
+                      )}
+                    </Field>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="gender">Sexo / Gênero *</FieldLabel>
-                    <Select
-                      value={guestData.gender}
-                      onValueChange={(val) =>
-                        setGuestData((prev) => ({ ...prev, gender: val }))
-                      }
-                    >
-                      <SelectTrigger id="gender">
-                        <SelectValue placeholder="Selecione o sexo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Masculino">Masculino</SelectItem>
-                        <SelectItem value="Feminino">Feminino</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {guestErrors.gender && (
-                      <FieldError>{guestErrors.gender}</FieldError>
-                    )}
-                  </Field>
+                    <Field data-invalid={!!guestErrors.birthDate}>
+                      <FieldLabel htmlFor="birthDate">
+                        Data de Nascimento *
+                      </FieldLabel>
+                      <Input
+                        id="birthDate"
+                        type="date"
+                        value={guestData.birthDate}
+                        aria-invalid={!!guestErrors.birthDate}
+                        onChange={(e) =>
+                          setGuestData((prev) => ({
+                            ...prev,
+                            birthDate: e.target.value,
+                          }))
+                        }
+                        className="min-h-[44px]"
+                      />
+                      {guestErrors.birthDate && (
+                        <FieldError>{guestErrors.birthDate}</FieldError>
+                      )}
+                    </Field>
+                  </div>
 
-                  <Field>
-                    <FieldLabel htmlFor="cityState">Cidade / Estado *</FieldLabel>
-                    <Input
-                      id="cityState"
-                      value={guestData.cityState}
-                      onChange={(e) =>
-                        setGuestData((prev) => ({
-                          ...prev,
-                          cityState: e.target.value,
-                        }))
-                      }
-                      placeholder="Ex: Belo Horizonte / MG"
-                    />
-                    {guestErrors.cityState && (
-                      <FieldError>{guestErrors.cityState}</FieldError>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <Field data-invalid={!!guestErrors.gender}>
+                      <FieldLabel htmlFor="gender">Sexo / Gênero *</FieldLabel>
+                      <Select
+                        value={guestData.gender || undefined}
+                        onValueChange={(val) =>
+                          setGuestData((prev) => ({ ...prev, gender: val }))
+                        }
+                      >
+                        <SelectTrigger id="gender" className="min-h-[44px] w-full">
+                          <SelectValue placeholder="Selecione o sexo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Masculino">Masculino</SelectItem>
+                          <SelectItem value="Feminino">Feminino</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {guestErrors.gender && (
+                        <FieldError>{guestErrors.gender}</FieldError>
+                      )}
+                    </Field>
+
+                    <Field data-invalid={!!guestErrors.cityState}>
+                      <FieldLabel htmlFor="cityState">Cidade / Estado *</FieldLabel>
+                      <Input
+                        id="cityState"
+                        value={guestData.cityState}
+                        aria-invalid={!!guestErrors.cityState}
+                        onChange={(e) =>
+                          setGuestData((prev) => ({
+                            ...prev,
+                            cityState: e.target.value,
+                          }))
+                        }
+                        placeholder="Ex: Belo Horizonte / MG"
+                        className="min-h-[44px]"
+                      />
+                      {guestErrors.cityState && (
+                        <FieldError>{guestErrors.cityState}</FieldError>
+                      )}
+                    </Field>
+                  </div>
+
+                  {userProfile &&
+                    (!userProfile.phone ||
+                      !userProfile.cpf ||
+                      !userProfile.birth_date ||
+                      !userProfile.gender ||
+                      !resolveProfileCityState(userProfile)) && (
+                      <label
+                        htmlFor="save-step1-profile"
+                        className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-2.5 text-xs sm:text-sm text-foreground"
+                      >
+                        <Checkbox
+                          id="save-step1-profile"
+                          checked={saveMissingToProfile}
+                          onCheckedChange={(checked) =>
+                            setSaveMissingToProfile(!!checked)
+                          }
+                        />
+                        <span>
+                          Salvar os campos preenchidos no meu perfil para agilizar próximas inscrições
+                        </span>
+                      </label>
                     )}
-                  </Field>
-                </div>
+                </FieldGroup>
               </div>
             )}
 
@@ -856,7 +998,7 @@ export default function Events() {
                         {field.type === "text" && (
                           <Input
                             id={field.id}
-                            value={customResponses[field.id] || ""}
+                            value={String(customResponses[field.id] ?? "")}
                             onChange={(e) => {
                               const val = e.target.value
                               if (field.validationPreset === "cep") {
@@ -878,7 +1020,7 @@ export default function Events() {
                         {field.type === "textarea" && (
                           <Textarea
                             id={field.id}
-                            value={customResponses[field.id] || ""}
+                            value={String(customResponses[field.id] ?? "")}
                             onChange={(e) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -894,7 +1036,7 @@ export default function Events() {
                           <Input
                             id={field.id}
                             type="number"
-                            value={customResponses[field.id] || ""}
+                            value={String(customResponses[field.id] ?? "")}
                             onChange={(e) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -912,7 +1054,7 @@ export default function Events() {
                           <Input
                             id={field.id}
                             type="date"
-                            value={customResponses[field.id] || ""}
+                            value={String(customResponses[field.id] ?? "")}
                             onChange={(e) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -924,7 +1066,7 @@ export default function Events() {
 
                         {field.type === "select" && (
                           <Select
-                            value={customResponses[field.id] || "none"}
+                            value={String(customResponses[field.id] || "none")}
                             onValueChange={(val) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -948,7 +1090,7 @@ export default function Events() {
 
                         {field.type === "radio" && (
                           <RadioGroup
-                            value={customResponses[field.id] || ""}
+                            value={String(customResponses[field.id] ?? "")}
                             onValueChange={(val) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -974,8 +1116,8 @@ export default function Events() {
                         {field.type === "checkbox" && (
                           <div className="mt-2 flex flex-col gap-2.5">
                             {field.options.map((opt) => {
-                              const checkedList =
-                                customResponses[field.id] || []
+                              const rawVal = customResponses[field.id]
+                              const checkedList = Array.isArray(rawVal) ? rawVal : []
                               const isChecked = checkedList.includes(opt)
                               return (
                                 <div key={opt} className="flex items-center gap-2">
@@ -1177,17 +1319,37 @@ export default function Events() {
                       className="min-h-[80px]"
                     />
                   </Field>
+
+                  {userProfile &&
+                    !userProfile.dietary_restrictions &&
+                    notes.trim() !== "" && (
+                      <label
+                        htmlFor="save-step3-dietary"
+                        className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-2.5 text-xs sm:text-sm text-foreground"
+                      >
+                        <Checkbox
+                          id="save-step3-dietary"
+                          checked={saveMissingToProfile}
+                          onCheckedChange={(checked) =>
+                            setSaveMissingToProfile(!!checked)
+                          }
+                        />
+                        <span>
+                          Salvar restrições alimentares/observações no meu perfil
+                        </span>
+                      </label>
+                    )}
                 </div>
               )
             })()}
           </CardContent>
 
           {/* Stepper Navigation Actions */}
-          <CardFooter className="flex justify-between border-t border-border/40 bg-muted/15 p-6">
+          <CardFooter className="flex justify-between gap-3 border-t border-border/40 bg-muted/15 p-6">
             <Button
               variant="outline"
               onClick={handlePrevStep}
-              className="cursor-pointer rounded-lg font-bold hover:bg-muted"
+              className="min-h-[44px] cursor-pointer rounded-lg font-bold hover:bg-muted"
               disabled={activeStep === 1 || submitting}
             >
               Voltar
@@ -1196,14 +1358,14 @@ export default function Events() {
             {activeStep < 3 ? (
               <Button
                 onClick={handleNextStep}
-                className="flex cursor-pointer items-center gap-1 rounded-lg font-bold"
+                className="flex min-h-[44px] cursor-pointer items-center gap-1 rounded-lg font-bold"
               >
                 Avançar <ChevronRight className="h-4 w-4" />
               </Button>
             ) : (
               <Button
                 onClick={handleConfirmRegistration}
-                className="cursor-pointer rounded-lg bg-primary font-bold text-primary-foreground shadow-md shadow-primary/20"
+                className="min-h-[44px] cursor-pointer rounded-lg bg-primary font-bold text-primary-foreground shadow-md shadow-primary/20"
                 disabled={
                   submitting || 
                   (calculateTotalPrice(registeringRetreat?.price || 0, customFormFields, customResponses) > 0 && 
@@ -1493,7 +1655,7 @@ export default function Events() {
                       )
                     ) : (
                       <Button
-                        onClick={() => setRegisteringRetreat(retreat)}
+                        onClick={() => handleStartRegistration(retreat)}
                         className="mt-3 min-h-[44px] w-full cursor-pointer rounded-xl font-bold"
                       >
                         Inscrever-se

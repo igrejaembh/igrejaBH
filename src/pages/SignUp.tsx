@@ -7,6 +7,14 @@ import {
     validateCPF 
 } from "../lib/schemas"
 import { formatPhone } from "@/lib/phoneUtils"
+import { cleanCPF, formatCPF } from "@/lib/cpfUtils"
+import {
+    claimParticipantRegistrationsSafe,
+    clearGuestPrefillSession,
+    getSafeRedirectPath,
+    readGuestPrefillFromSession,
+    toProfileGenderValue,
+} from "@/lib/participantProfile"
 import {
     normalizeGender,
     normalizeMaritalStatus,
@@ -28,11 +36,13 @@ import {
 } from "@/components/ui/card"
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   InputGroup,
   InputGroupAddon,
@@ -49,13 +59,14 @@ import {
     XIcon,
     BookOpenIcon,
     UsersIcon,
-    InfoIcon
+    InfoIcon,
+    AlertCircleIcon,
 } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import supabase from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { CardSelector, CardSelectorItem } from "@/components/ui/card-selector";
 import { 
     Dialog, 
@@ -66,22 +77,6 @@ import {
 } from "@/components/ui/dialog";
 import { ImageCropper } from "@/components/ImageCropper";
 
-const formatCPF = (value: string) => {
-    const clean = value.replace(/\D/g, "");
-    const digits = clean.slice(0, 11);
-    
-    if (digits.length <= 3) {
-        return digits;
-    }
-    if (digits.length <= 6) {
-        return `${digits.slice(0, 3)}.${digits.slice(3)}`;
-    }
-    if (digits.length <= 9) {
-        return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
-    }
-    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
-};
-
 function AccountTypeSelector({ 
     selected, 
     onSelect 
@@ -90,25 +85,25 @@ function AccountTypeSelector({
     onSelect: (type: 'visitor' | 'church_member') => void;
 }) {
     return (
-        <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted/60 rounded-xl border border-border/50">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 p-1 bg-muted/60 rounded-xl border border-border/50">
             <button
                 type="button"
                 onClick={() => onSelect('visitor')}
                 className={cn(
-                    "flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs sm:text-sm font-semibold transition-all min-h-[44px] cursor-pointer",
+                    "flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs sm:text-sm font-semibold transition-all min-h-[44px] cursor-pointer text-center",
                     selected === 'visitor'
                         ? "bg-background text-foreground shadow-xs border border-border/60"
                         : "text-muted-foreground hover:text-foreground"
                 )}
             >
                 <BookOpenIcon className="h-4 w-4 text-primary shrink-0" />
-                <span>Acesso aos Estudos</span>
+                <span>Participante de Retiros &amp; Estudos</span>
             </button>
             <button
                 type="button"
                 onClick={() => onSelect('church_member')}
                 className={cn(
-                    "flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs sm:text-sm font-semibold transition-all min-h-[44px] cursor-pointer",
+                    "flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs sm:text-sm font-semibold transition-all min-h-[44px] cursor-pointer text-center",
                     selected === 'church_member'
                         ? "bg-background text-foreground shadow-xs border border-border/60"
                         : "text-muted-foreground hover:text-foreground"
@@ -123,9 +118,72 @@ function AccountTypeSelector({
 
 export default function SignUp() {
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
     const fileInputRef = useRef<HTMLInputElement>(null)
 
+    const initialPrefill = useMemo(() => {
+        const stored = readGuestPrefillFromSession()
+        const rawPhone =
+            searchParams.get("telefone") ||
+            searchParams.get("phone") ||
+            stored?.phone ||
+            ""
+        const rawCpf = searchParams.get("cpf") || stored?.cpf || ""
+        const rawGender =
+            searchParams.get("genero") ||
+            searchParams.get("gender") ||
+            stored?.gender ||
+            ""
+        const rawBirthDate =
+            searchParams.get("nascimento") ||
+            searchParams.get("birthDate") ||
+            searchParams.get("birth_date") ||
+            stored?.birthDate ||
+            ""
+        return {
+            fullName:
+                searchParams.get("nome") ||
+                searchParams.get("fullName") ||
+                searchParams.get("name") ||
+                stored?.fullName ||
+                "",
+            email: searchParams.get("email") || stored?.email || "",
+            phone: rawPhone ? formatPhone(rawPhone) : "",
+            cpf: rawCpf ? formatCPF(rawCpf) : "",
+            birthDate: /^\d{4}-\d{2}-\d{2}$/.test(rawBirthDate)
+                ? rawBirthDate
+                : "",
+            gender: toProfileGenderValue(rawGender),
+            cityState:
+                searchParams.get("cidade") ||
+                searchParams.get("cityState") ||
+                searchParams.get("city_state") ||
+                stored?.cityState ||
+                "",
+            dietaryRestrictions:
+                searchParams.get("restricoes") ||
+                searchParams.get("dietaryRestrictions") ||
+                searchParams.get("dietary_restrictions") ||
+                stored?.dietaryRestrictions ||
+                "",
+            emergencyContact:
+                searchParams.get("emergencia") ||
+                searchParams.get("emergencyContact") ||
+                searchParams.get("emergency_contact") ||
+                stored?.emergencyContact ||
+                "",
+            redirectTo: getSafeRedirectPath(searchParams.get("redirect")),
+            fromGuestRetreat: Boolean(
+                searchParams.get("email") ||
+                    searchParams.get("nome") ||
+                    searchParams.get("cpf") ||
+                    stored
+            ),
+        }
+    }, [searchParams])
+
     const signForm = useForm<SignUpValue>({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resolver: zodResolver(signUpSchema) as any,
         defaultValues: {
             fullName: "",
@@ -155,19 +213,82 @@ export default function SignUp() {
         }
     })
 
-    const [accountType, setAccountType] = useState<'visitor' | 'church_member'>('visitor')
+    const [accountType, setAccountType] = useState<'visitor' | 'church_member'>(() => {
+        const mode = (searchParams.get("tab") || searchParams.get("modo") || "").toLowerCase()
+        if (mode === "igreja" || mode === "discipulo" || mode === "church") {
+            return "church_member"
+        }
+        return "visitor"
+    })
     const [cpfNotFound, setCpfNotFound] = useState(false)
+    const [visitorCpfNotice, setVisitorCpfNotice] = useState<
+        | { type: "linked"; cpf: string }
+        | { type: "church_pre_registered"; cpf: string }
+        | null
+    >(null)
+    const [checkingVisitorCpf, setCheckingVisitorCpf] = useState(false)
 
     const visitorForm = useForm<VisitorSignUpValue>({
         resolver: zodResolver(visitorSignUpSchema),
         defaultValues: {
-            fullName: "",
-            email: "",
-            phone: "",
+            fullName: initialPrefill.fullName,
+            email: initialPrefill.email,
+            phone: initialPrefill.phone,
+            cpf: initialPrefill.cpf,
+            birthDate: initialPrefill.birthDate,
+            gender: initialPrefill.gender,
+            cityState: initialPrefill.cityState,
+            dietaryRestrictions: initialPrefill.dietaryRestrictions,
+            emergencyContact: initialPrefill.emergencyContact,
             password: "",
             confirmPassword: "",
         }
     })
+
+    const watchedVisitorCpf = visitorForm.watch("cpf")
+
+    useEffect(() => {
+        const clean = cleanCPF(watchedVisitorCpf)
+        if (clean.length !== 11 || !validateCPF(clean)) {
+            setVisitorCpfNotice(null)
+            return
+        }
+
+        let active = true
+        const timer = setTimeout(async () => {
+            setCheckingVisitorCpf(true)
+            try {
+                const formatted = formatCPF(clean)
+                const { data, error } = await supabase.rpc("check_cpf_registration", {
+                    p_cpf: formatted,
+                })
+                if (!active || error || !data || data.length === 0) return
+
+                const result = data[0]
+                if (!result.exists_profile) {
+                    setVisitorCpfNotice(null)
+                } else if (result.is_linked) {
+                    setVisitorCpfNotice({ type: "linked", cpf: formatted })
+                } else if (result.has_baptism_date || result.is_baptized) {
+                    setVisitorCpfNotice({
+                        type: "church_pre_registered",
+                        cpf: formatted,
+                    })
+                } else {
+                    setVisitorCpfNotice(null)
+                }
+            } catch (err) {
+                console.warn("Erro ao consultar CPF na aba de participante:", err)
+            } finally {
+                if (active) setCheckingVisitorCpf(false)
+            }
+        }, 300)
+
+        return () => {
+            active = false
+            clearTimeout(timer)
+        }
+    }, [watchedVisitorCpf])
 
     const [showPassword, setShowPassword] = useState(false)
     const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -179,9 +300,8 @@ export default function SignUp() {
     const [verifyingCpf, setVerifyingCpf] = useState(false)
     const [cpfError, setCpfError] = useState<string | null>(null)
 
-    const handleVerifyCpf = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const cleanCpf = verificationCpf.replace(/\D/g, "");
+    const verifyAndAdvanceChurchCpf = async (cpfToVerify: string) => {
+        const cleanCpf = cpfToVerify.replace(/\D/g, "");
         if (cleanCpf.length !== 11) {
             setCpfError("CPF deve conter 11 dígitos");
             setCpfNotFound(false);
@@ -259,6 +379,11 @@ export default function SignUp() {
             setVerifyingCpf(false);
         }
     };
+
+    const handleVerifyCpf = async (e: React.FormEvent) => {
+        e.preventDefault();
+        await verifyAndAdvanceChurchCpf(verificationCpf);
+    };
     const [avatarFile, setAvatarFile] = useState<File | null>(null)
     const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
     const [isCropping, setIsCropping] = useState(false)
@@ -319,13 +444,38 @@ export default function SignUp() {
     async function onVisitorSubmit(data: VisitorSignUpValue) {
         setSubmitting(true)
         const signupOperation = async () => {
+            const cleanedVisitorCpf = cleanCPF(data.cpf)
+            const formattedVisitorCpf = cleanedVisitorCpf.length === 11 ? formatCPF(cleanedVisitorCpf) : null
+
+            if (formattedVisitorCpf) {
+                const { data: checkData, error: checkError } = await supabase.rpc('check_cpf_registration', {
+                    p_cpf: formattedVisitorCpf
+                })
+                if (!checkError && checkData && checkData.length > 0 && checkData[0].exists_profile) {
+                    const check = checkData[0]
+                    if (check.is_linked) {
+                        throw new Error("Este CPF já está vinculado a uma conta existente. Faça login para acessar.")
+                    }
+                    if (check.has_baptism_date || check.is_baptized) {
+                        throw new Error("Localizamos um pré-cadastro seu na Igreja em Belo Horizonte. Use a aba 'Caminho na Igreja em BH' para ativar sua conta.")
+                    }
+                }
+            }
+
             const { data: authData, error: authError } = await supabase.auth.signUp({
-                email: data.email,
+                email: data.email.trim(),
                 password: data.password,
                 options: {
                     data: {
-                        full_name: data.fullName,
-                        phone: data.phone || null,
+                        account_mode: "visitor",
+                        full_name: data.fullName.trim(),
+                        phone: data.phone?.trim() || null,
+                        cpf: formattedVisitorCpf,
+                        birth_date: data.birthDate?.trim() || null,
+                        gender: data.gender || null,
+                        city_state: data.cityState?.trim() || null,
+                        dietary_restrictions: data.dietaryRestrictions?.trim() || null,
+                        emergency_contact: data.emergencyContact?.trim() || null,
                     }
                 }
             })
@@ -333,7 +483,7 @@ export default function SignUp() {
             if (authError) throw authError
             if (!authData.user) throw new Error("Erro ao criar conta")
 
-            if (avatarFile) {
+            if (avatarFile && authData.session) {
                 try {
                     const fileExt = avatarFile.name.split('.').pop() || "jpg"
                     const filePath = `${authData.user.id}/avatar.${fileExt}`
@@ -357,17 +507,33 @@ export default function SignUp() {
                 }
             }
 
-            return authData
+            let claimedCount = 0
+            if (authData.session) {
+                claimedCount = await claimParticipantRegistrationsSafe()
+            }
+
+            clearGuestPrefillSession()
+            return { authData, claimedCount }
         }
 
         toast.promise(signupOperation(), {
-            loading: "Criando sua conta de acesso...",
-            success: () => {
-                navigate('/dashboard')
+            loading: "Criando sua conta de participante...",
+            success: ({ authData, claimedCount }) => {
+                if (!authData.session) {
+                    const loginUrl = initialPrefill.redirectTo
+                        ? `/entrar?redirect=${encodeURIComponent(initialPrefill.redirectTo)}`
+                        : "/entrar"
+                    navigate(loginUrl)
+                    return "Conta criada! Confirme seu e-mail e faça login para acessar."
+                }
+                navigate(initialPrefill.redirectTo || '/dashboard')
+                if (claimedCount > 0) {
+                    return `Conta criada e ${claimedCount} inscrição(ões) anteriores vinculada(s)!`
+                }
                 return "Conta criada com sucesso! Seja bem-vindo(a)."
             },
             error: (error) => {
-                console.error("Erro no cadastro de visitante:", error)
+                console.error("Erro no cadastro de participante:", error)
                 if (error instanceof Error) {
                     if (error.message === "User already registered") {
                         return "Este e-mail já está cadastrado."
@@ -485,13 +651,17 @@ export default function SignUp() {
 
             if (profileError) throw profileError
 
+            if (authData.session) {
+                await claimParticipantRegistrationsSafe()
+            }
+
             return authData
         }
 
         toast.promise(signupOperation(), {
             loading: "Criando sua conta...",
             success: () => {
-                navigate('/dashboard')
+                navigate(initialPrefill.redirectTo || '/dashboard')
                 return "Cadastro realizado com sucesso! Seja bem-vindo(a)."
             },
             error: (error) => {
@@ -510,16 +680,32 @@ export default function SignUp() {
         })
     }
 
+    const loginTarget = useMemo(() => {
+        const params = new URLSearchParams()
+        if (initialPrefill.redirectTo) params.set("redirect", initialPrefill.redirectTo)
+        if (initialPrefill.email) params.set("email", initialPrefill.email)
+        const qs = params.toString()
+        return qs ? `/entrar?${qs}` : "/entrar"
+    }, [initialPrefill.redirectTo, initialPrefill.email])
+
     return (
-        <div className="relative min-h-screen flex items-center justify-center py-10 px-4 bg-background">
+        <div className="relative min-h-screen flex items-center justify-center py-8 px-4 bg-background">
             {/* Dynamic Background Elements */}
             <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
                 <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-primary/20 blur-[120px]" />
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-secondary/20 blur-[120px]" />
             </div>
 
+            <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/*"
+                onChange={handleFileChange}
+            />
+
             {accountType === 'visitor' ? (
-                <Card className="w-full max-w-lg border-border bg-card/50 backdrop-blur-xl shadow-2xl relative z-10">
+                <Card className="w-full max-w-xl border-border bg-card/50 backdrop-blur-xl shadow-2xl relative z-10">
                     <CardHeader className="space-y-3 text-center">
                         <div className="flex items-center justify-between">
                             <Button variant="ghost" size="sm" onClick={() => navigate('/')} className="min-h-[44px]">
@@ -540,22 +726,33 @@ export default function SignUp() {
 
                         <div>
                             <CardTitle className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-                                Criar Conta de Acesso
+                                Participante de Retiros &amp; Estudos
                             </CardTitle>
                             <CardDescription className="text-muted-foreground text-xs sm:text-sm mt-1">
-                                Acesse as mensagens, trilhas de estudos e materiais da Igreja em Belo Horizonte
+                                Crie sua conta para acessar estudos e preencher suas próximas inscrições em retiros e encontros em segundos
                             </CardDescription>
                         </div>
+
+                        {initialPrefill.fromGuestRetreat && (
+                            <div className="rounded-xl border border-primary/25 bg-primary/5 p-3 text-left flex items-start gap-2.5">
+                                <InfoIcon className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                                <p className="text-xs text-muted-foreground leading-relaxed">
+                                    Preenchemos seus dados a partir da sua inscrição. Ao concluir, suas inscrições anteriores com este e-mail ou CPF serão vinculadas automaticamente à sua conta.
+                                </p>
+                            </div>
+                        )}
                     </CardHeader>
 
                     <CardContent>
-                        <form id="visitor-sign-up-form" onSubmit={visitorForm.handleSubmit(onVisitorSubmit)} className="space-y-4">
+                        <form id="visitor-sign-up-form" onSubmit={visitorForm.handleSubmit(onVisitorSubmit)} className="flex flex-col gap-5">
                             {/* Avatar */}
-                            <div className="flex flex-col items-center gap-2 mb-2">
+                            <div className="flex flex-col items-center gap-2">
                                 <div className="relative h-20 w-20 group">
-                                    <div 
-                                        className="relative h-full w-full rounded-full border-2 border-dashed border-muted-foreground/40 flex items-center justify-center bg-muted overflow-hidden cursor-pointer shadow-inner" 
+                                    <button
+                                        type="button"
+                                        className="relative h-full w-full rounded-full border-2 border-dashed border-muted-foreground/40 flex items-center justify-center bg-muted overflow-hidden cursor-pointer shadow-inner"
                                         onClick={() => fileInputRef.current?.click()}
+                                        aria-label="Selecionar foto de perfil"
                                     >
                                         {avatarPreview ? (
                                             <img src={avatarPreview} alt="Preview" className="h-full w-full object-cover" />
@@ -565,7 +762,7 @@ export default function SignUp() {
                                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                                             <UploadIcon className="h-5 w-5 text-white" />
                                         </div>
-                                    </div>
+                                    </button>
                                     {avatarPreview && (
                                         <button 
                                             type="button" 
@@ -580,53 +777,18 @@ export default function SignUp() {
                                 <p className="text-[11px] text-muted-foreground">Foto de perfil (opcional)</p>
                             </div>
 
-                            <FieldGroup className="space-y-3">
+                            <FieldGroup>
                                 <Controller
                                     name="fullName"
                                     control={visitorForm.control}
                                     render={({ field, fieldState }) => (
                                         <Field data-invalid={fieldState.invalid}>
-                                            <FieldLabel>Nome Completo*</FieldLabel>
-                                            <Input {...field} placeholder="Seu nome completo" className="min-h-[44px]" />
-                                            <FieldError errors={[fieldState.error]} />
-                                        </Field>
-                                    )}
-                                />
-
-                                <Controller
-                                    name="email"
-                                    control={visitorForm.control}
-                                    render={({ field, fieldState }) => (
-                                        <Field data-invalid={fieldState.invalid}>
-                                            <FieldLabel>E-mail*</FieldLabel>
-                                            <Input {...field} type="email" placeholder="seu@email.com" className="min-h-[44px]" />
-                                            <FieldError errors={[fieldState.error]} />
-                                        </Field>
-                                    )}
-                                />
-
-                                <Controller
-                                    name="phone"
-                                    control={visitorForm.control}
-                                    render={({ field: { onChange, value, ...fieldProps }, fieldState }) => (
-                                        <Field data-invalid={fieldState.invalid}>
-                                            <FieldLabel>Telefone / WhatsApp (Opcional)</FieldLabel>
+                                            <FieldLabel htmlFor="visitor-fullname">Nome Completo*</FieldLabel>
                                             <Input
-                                                {...fieldProps}
-                                                value={value || ""}
-                                                onChange={(e) => {
-                                                    const cursor = e.target.selectionStart;
-                                                    const formatted = formatPhone(e.target.value);
-                                                    onChange(formatted);
-                                                    setTimeout(() => {
-                                                        if (e.target && cursor !== null) {
-                                                            const diff = formatted.length - e.target.value.length;
-                                                            e.target.setSelectionRange(cursor + diff, cursor + diff);
-                                                        }
-                                                    }, 0);
-                                                }}
-                                                placeholder="+55 (31) 9XXXX-XXXX"
-                                                maxLength={20}
+                                                {...field}
+                                                id="visitor-fullname"
+                                                aria-invalid={fieldState.invalid}
+                                                placeholder="Seu nome completo"
                                                 className="min-h-[44px]"
                                             />
                                             <FieldError errors={[fieldState.error]} />
@@ -634,17 +796,263 @@ export default function SignUp() {
                                     )}
                                 />
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <Controller
+                                        name="email"
+                                        control={visitorForm.control}
+                                        render={({ field, fieldState }) => (
+                                            <Field data-invalid={fieldState.invalid}>
+                                                <FieldLabel htmlFor="visitor-email">E-mail*</FieldLabel>
+                                                <Input
+                                                    {...field}
+                                                    id="visitor-email"
+                                                    type="email"
+                                                    aria-invalid={fieldState.invalid}
+                                                    placeholder="seu@email.com"
+                                                    className="min-h-[44px]"
+                                                />
+                                                <FieldError errors={[fieldState.error]} />
+                                            </Field>
+                                        )}
+                                    />
+
+                                    <Controller
+                                        name="phone"
+                                        control={visitorForm.control}
+                                        render={({ field: { onChange, value, ...fieldProps }, fieldState }) => (
+                                            <Field data-invalid={fieldState.invalid}>
+                                                <FieldLabel htmlFor="visitor-phone">Telefone / WhatsApp (Opcional)</FieldLabel>
+                                                <Input
+                                                    {...fieldProps}
+                                                    id="visitor-phone"
+                                                    value={value || ""}
+                                                    aria-invalid={fieldState.invalid}
+                                                    onChange={(e) => {
+                                                        const cursor = e.target.selectionStart;
+                                                        const formatted = formatPhone(e.target.value);
+                                                        onChange(formatted);
+                                                        setTimeout(() => {
+                                                            if (e.target && cursor !== null) {
+                                                                const diff = formatted.length - e.target.value.length;
+                                                                e.target.setSelectionRange(cursor + diff, cursor + diff);
+                                                            }
+                                                        }, 0);
+                                                    }}
+                                                    placeholder="+55 (31) 9XXXX-XXXX"
+                                                    maxLength={20}
+                                                    className="min-h-[44px]"
+                                                />
+                                                <FieldError errors={[fieldState.error]} />
+                                            </Field>
+                                        )}
+                                    />
+                                </div>
+                            </FieldGroup>
+
+                            <FieldSeparator>Dados para Retiros e Encontros (Opcional)</FieldSeparator>
+
+                            <FieldGroup>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <Controller
+                                        name="cpf"
+                                        control={visitorForm.control}
+                                        render={({ field: { onChange, value, ...fieldProps }, fieldState }) => (
+                                            <Field data-invalid={fieldState.invalid}>
+                                                <FieldLabel htmlFor="visitor-cpf">CPF (Opcional)</FieldLabel>
+                                                <Input
+                                                    {...fieldProps}
+                                                    id="visitor-cpf"
+                                                    inputMode="numeric"
+                                                    value={value || ""}
+                                                    aria-invalid={fieldState.invalid}
+                                                    onChange={(e) => onChange(formatCPF(e.target.value))}
+                                                    placeholder="000.000.000-00"
+                                                    maxLength={14}
+                                                    className="min-h-[44px]"
+                                                />
+                                                <FieldDescription>
+                                                    Usado para preencher inscrições e localizar registros anteriores.
+                                                </FieldDescription>
+                                                <FieldError errors={[fieldState.error]} />
+                                            </Field>
+                                        )}
+                                    />
+
+                                    <Controller
+                                        name="birthDate"
+                                        control={visitorForm.control}
+                                        render={({ field, fieldState }) => (
+                                            <Field data-invalid={fieldState.invalid}>
+                                                <FieldLabel htmlFor="visitor-birthdate">Data de Nascimento (Opcional)</FieldLabel>
+                                                <Input
+                                                    {...field}
+                                                    id="visitor-birthdate"
+                                                    type="date"
+                                                    value={field.value || ""}
+                                                    aria-invalid={fieldState.invalid}
+                                                    className="min-h-[44px]"
+                                                />
+                                                <FieldError errors={[fieldState.error]} />
+                                            </Field>
+                                        )}
+                                    />
+                                </div>
+
+                                {checkingVisitorCpf && (
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        <span>Verificando CPF...</span>
+                                    </div>
+                                )}
+
+                                {visitorCpfNotice?.type === "church_pre_registered" && (
+                                    <div
+                                        role="status"
+                                        className="rounded-xl border border-primary/30 bg-primary/5 p-3.5 text-left flex flex-col gap-2.5"
+                                    >
+                                        <div className="flex items-start gap-2">
+                                            <InfoIcon className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                                            <p className="text-xs text-foreground leading-relaxed">
+                                                Localizamos um pré-cadastro seu na Igreja em Belo Horizonte! Para ativar seu perfil completo de discípulo com seus dados já preenchidos, use a aba <strong>Caminho na Igreja em BH</strong>.
+                                            </p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                setVerificationCpf(visitorCpfNotice.cpf)
+                                                setAccountType("church_member")
+                                                setCpfError(null)
+                                                setCpfNotFound(false)
+                                                void verifyAndAdvanceChurchCpf(visitorCpfNotice.cpf)
+                                            }}
+                                            className="w-full min-h-[44px] text-xs font-semibold gap-2 border-primary/40 text-primary hover:bg-primary/10 cursor-pointer"
+                                        >
+                                            <UsersIcon className="h-3.5 w-3.5" />
+                                            Ir para Caminho na Igreja em BH
+                                        </Button>
+                                    </div>
+                                )}
+
+                                {visitorCpfNotice?.type === "linked" && (
+                                    <div
+                                        role="alert"
+                                        className="rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 text-left flex flex-col gap-2.5"
+                                    >
+                                        <div className="flex items-start gap-2">
+                                            <AlertCircleIcon className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                                            <p className="text-xs text-foreground leading-relaxed">
+                                                Este CPF já está vinculado a uma conta ativa. Entre com seu e-mail e senha para acessar seus dados e inscrições.
+                                            </p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            asChild
+                                            className="w-full min-h-[44px] text-xs font-semibold"
+                                        >
+                                            <Link to={loginTarget}>Entrar na minha conta</Link>
+                                        </Button>
+                                    </div>
+                                )}
+
+                                <Controller
+                                    name="gender"
+                                    control={visitorForm.control}
+                                    render={({ field, fieldState }) => (
+                                        <Field data-invalid={fieldState.invalid}>
+                                            <FieldLabel>Sexo / Gênero (Opcional)</FieldLabel>
+                                            <CardSelector
+                                                value={field.value || ""}
+                                                onValueChange={field.onChange}
+                                                columns={2}
+                                            >
+                                                <CardSelectorItem value="masculino" label="Masculino" size="sm" />
+                                                <CardSelectorItem value="feminino" label="Feminino" size="sm" />
+                                            </CardSelector>
+                                            <FieldError errors={[fieldState.error]} />
+                                        </Field>
+                                    )}
+                                />
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <Controller
+                                        name="cityState"
+                                        control={visitorForm.control}
+                                        render={({ field, fieldState }) => (
+                                            <Field data-invalid={fieldState.invalid}>
+                                                <FieldLabel htmlFor="visitor-city-state">Cidade / Estado (Opcional)</FieldLabel>
+                                                <Input
+                                                    {...field}
+                                                    id="visitor-city-state"
+                                                    value={field.value || ""}
+                                                    aria-invalid={fieldState.invalid}
+                                                    placeholder="Ex: Belo Horizonte / MG"
+                                                    className="min-h-[44px]"
+                                                />
+                                                <FieldError errors={[fieldState.error]} />
+                                            </Field>
+                                        )}
+                                    />
+
+                                    <Controller
+                                        name="emergencyContact"
+                                        control={visitorForm.control}
+                                        render={({ field, fieldState }) => (
+                                            <Field data-invalid={fieldState.invalid}>
+                                                <FieldLabel htmlFor="visitor-emergency">Contato de Emergência (Opcional)</FieldLabel>
+                                                <Input
+                                                    {...field}
+                                                    id="visitor-emergency"
+                                                    value={field.value || ""}
+                                                    aria-invalid={fieldState.invalid}
+                                                    placeholder="Ex: Maria (31) 99999-9999"
+                                                    className="min-h-[44px]"
+                                                />
+                                                <FieldError errors={[fieldState.error]} />
+                                            </Field>
+                                        )}
+                                    />
+                                </div>
+
+                                <Controller
+                                    name="dietaryRestrictions"
+                                    control={visitorForm.control}
+                                    render={({ field, fieldState }) => (
+                                        <Field data-invalid={fieldState.invalid}>
+                                            <FieldLabel htmlFor="visitor-dietary">Restrições Alimentares ou Alergias (Opcional)</FieldLabel>
+                                            <Textarea
+                                                {...field}
+                                                id="visitor-dietary"
+                                                value={field.value || ""}
+                                                aria-invalid={fieldState.invalid}
+                                                placeholder="Ex: Alergia a lactose, intolerância a glúten, medicação contínua..."
+                                                className="min-h-[84px]"
+                                            />
+                                            <FieldError errors={[fieldState.error]} />
+                                        </Field>
+                                    )}
+                                />
+                            </FieldGroup>
+
+                            <FieldSeparator>Segurança</FieldSeparator>
+
+                            <FieldGroup>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <Controller
                                         name="password"
                                         control={visitorForm.control}
                                         render={({ field, fieldState }) => (
                                             <Field data-invalid={fieldState.invalid}>
-                                                <FieldLabel>Senha*</FieldLabel>
+                                                <FieldLabel htmlFor="visitor-password">Senha*</FieldLabel>
                                                 <InputGroup>
                                                     <InputGroupInput
                                                         {...field}
+                                                        id="visitor-password"
                                                         type={showPassword ? "text" : "password"}
+                                                        aria-invalid={fieldState.invalid}
                                                         placeholder="********"
                                                         className="min-h-[44px]"
                                                     />
@@ -653,6 +1061,7 @@ export default function SignUp() {
                                                             variant="ghost"
                                                             size="icon"
                                                             type="button"
+                                                            aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
                                                             onClick={() => setShowPassword(!showPassword)}
                                                             className="min-h-[44px] min-w-[44px]"
                                                         >
@@ -670,11 +1079,13 @@ export default function SignUp() {
                                         control={visitorForm.control}
                                         render={({ field, fieldState }) => (
                                             <Field data-invalid={fieldState.invalid}>
-                                                <FieldLabel>Confirmar Senha*</FieldLabel>
+                                                <FieldLabel htmlFor="visitor-confirm-password">Confirmar Senha*</FieldLabel>
                                                 <InputGroup>
                                                     <InputGroupInput
                                                         {...field}
+                                                        id="visitor-confirm-password"
                                                         type={showConfirmPassword ? "text" : "password"}
+                                                        aria-invalid={fieldState.invalid}
                                                         placeholder="********"
                                                         className="min-h-[44px]"
                                                     />
@@ -683,6 +1094,7 @@ export default function SignUp() {
                                                             variant="ghost"
                                                             size="icon"
                                                             type="button"
+                                                            aria-label={showConfirmPassword ? "Ocultar confirmação de senha" : "Mostrar confirmação de senha"}
                                                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                                                             className="min-h-[44px] min-w-[44px]"
                                                         >
@@ -699,12 +1111,12 @@ export default function SignUp() {
                         </form>
                     </CardContent>
 
-                    <CardFooter className="flex flex-col space-y-4">
+                    <CardFooter className="flex flex-col gap-4">
                         <Button 
                             className="w-full bg-primary hover:bg-primary/90 text-primary-foreground text-base font-semibold min-h-[48px] transition-all active:scale-[0.98]" 
                             type="submit" 
                             form="visitor-sign-up-form" 
-                            disabled={submitting}
+                            disabled={submitting || visitorCpfNotice?.type === "linked"}
                         >
                             {submitting ? (
                                 <>
@@ -717,8 +1129,8 @@ export default function SignUp() {
                         <p className="text-center text-sm text-muted-foreground">
                             Já tem uma conta?{" "}
                             <Link
-                                to="/entrar"
-                                className="text-primary hover:text-primary/80 font-medium transition-colors"
+                                to={loginTarget}
+                                className="inline-flex min-h-[44px] items-center text-primary hover:text-primary/80 font-medium transition-colors"
                             >
                                 Faça login
                             </Link>
@@ -783,7 +1195,7 @@ export default function SignUp() {
                                                 <div className="flex items-start gap-2">
                                                     <InfoIcon className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                                                     <p className="text-xs text-muted-foreground leading-relaxed">
-                                                        Não encontrou seu pré-cadastro? Você pode criar uma conta agora para acessar livremente os estudos e materiais.
+                                                        Não encontrou seu pré-cadastro? Você pode criar uma conta de participante para acessar estudos e agilizar inscrições em retiros e encontros.
                                                     </p>
                                                 </div>
                                                 <Button
@@ -798,7 +1210,7 @@ export default function SignUp() {
                                                     className="w-full min-h-[44px] text-xs font-semibold gap-2 border-primary/40 text-primary hover:bg-primary/10"
                                                 >
                                                     <BookOpenIcon className="h-3.5 w-3.5" />
-                                                    Criar Conta de Estudos Agora
+                                                    Criar Conta de Retiros &amp; Estudos
                                                 </Button>
                                             </div>
                                         )}
@@ -846,6 +1258,7 @@ export default function SignUp() {
                         <CardDescription className="text-muted-foreground">Preencha os dados abaixo para criar sua conta</CardDescription>
                     </CardHeader>
                 <CardContent>
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                     <form id="sign-up-form" onSubmit={signForm.handleSubmit(onSubmit as any)} className="space-y-6">
                         
                         {/* Seção: Avatar */}
@@ -875,15 +1288,6 @@ export default function SignUp() {
                                 )}
                             </div>
                             <p className="text-xs text-muted-foreground">Toque na imagem para carregar sua foto</p>
-
-
-                            <input 
-                                type="file" 
-                                ref={fileInputRef} 
-                                className="hidden" 
-                                accept="image/*" 
-                                onChange={handleFileChange}
-                            />
                         </div>
 
                         <FieldGroup className="grid grid-cols-1 md:grid-cols-2 gap-4">

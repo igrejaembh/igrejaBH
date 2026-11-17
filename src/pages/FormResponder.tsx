@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, Link, Navigate, useNavigate } from "react-router-dom"
 import {
   ClipboardList,
@@ -11,6 +11,7 @@ import {
   QrCode,
   Lock,
   Ticket,
+  UserPlus,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -21,6 +22,15 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { toast } from "sonner"
 import supabase from "@/lib/supabase"
+import type { Database } from "@/lib/database.types"
+import {
+  buildSignUpUrlWithPrefill,
+  normalizeNationalPhoneForForm,
+  resolveProfileCityState,
+  saveGuestPrefillToSession,
+  toEventGenderLabel,
+  type GuestRegistrationPrefill,
+} from "@/lib/participantProfile"
 import {
   isFieldVisible,
   formatValue,
@@ -37,6 +47,152 @@ import { ThemeToggle } from "@/components/ThemeToggle"
 import { parseEndOfDay } from "@/lib/utils"
 import type { User } from "@supabase/supabase-js"
 
+type ResponderProfile = Pick<
+  Database["public"]["Tables"]["profiles"]["Row"],
+  | "id"
+  | "full_name"
+  | "email"
+  | "phone"
+  | "cpf"
+  | "birth_date"
+  | "gender"
+  | "city_state"
+  | "address_city"
+  | "address_state"
+  | "dietary_restrictions"
+  | "emergency_contact"
+  | "is_dev"
+  | "is_presbyter"
+  | "can_post"
+>
+
+function isSpouseOrRelativeField(label: string, fid: string): boolean {
+  return (
+    label.includes("cônjuge") ||
+    label.includes("conjuge") ||
+    label.includes("espos") ||
+    label.includes("emergên") ||
+    label.includes("emergen") ||
+    label.includes("pai") ||
+    label.includes("mãe") ||
+    label.includes("mae") ||
+    fid.includes("conjuge") ||
+    fid.includes("emergen")
+  )
+}
+
+function isParticipantNameField(field: FormField): boolean {
+  const fid = field.id.toLowerCase()
+  const label = field.label.toLowerCase()
+  if (fid === "mandatory_full_name") return true
+  if (isSpouseOrRelativeField(label, fid)) return false
+  return label.includes("nome") || fid.includes("name")
+}
+
+function buildAutoFilledFormValues(
+  fields: FormField[],
+  profile: ResponderProfile,
+  fallbackEmail?: string | null
+): Record<string, string> {
+  const values: Record<string, string> = {}
+  const eventGender = toEventGenderLabel(profile.gender)
+  const cityState = resolveProfileCityState(profile)
+  const phoneFormatted = normalizeNationalPhoneForForm(profile.phone)
+  const cpfFormatted = profile.cpf ? formatValue(profile.cpf, "cpf") : ""
+
+  fields.forEach((field) => {
+    const fid = field.id.toLowerCase()
+    const label = field.label.toLowerCase()
+
+    if (isParticipantNameField(field)) {
+      if (profile.full_name) values[field.id] = profile.full_name
+    } else if (
+      fid === "mandatory_email" ||
+      field.validationPreset === "email" ||
+      label.includes("email") ||
+      label.includes("e-mail") ||
+      fid.includes("email")
+    ) {
+      const email = profile.email || fallbackEmail || ""
+      if (email) values[field.id] = email
+    } else if (
+      (fid === "mandatory_phone" ||
+        field.validationPreset === "phone" ||
+        label.includes("telefone") ||
+        label.includes("celular") ||
+        label.includes("whatsapp") ||
+        fid.includes("phone")) &&
+      !label.includes("emergên") &&
+      !label.includes("emergen") &&
+      !fid.includes("emergen")
+    ) {
+      if (phoneFormatted) values[field.id] = phoneFormatted
+    } else if (
+      fid === "mandatory_gender" ||
+      label.includes("sexo") ||
+      label.includes("gênero") ||
+      label.includes("genero") ||
+      fid.includes("gender") ||
+      fid.includes("sexo")
+    ) {
+      if (eventGender) {
+        if (field.options && field.options.length > 0) {
+          const matchedOption = field.options.find((opt) =>
+            opt.toLowerCase().includes(eventGender.toLowerCase())
+          )
+          if (matchedOption) values[field.id] = matchedOption
+        } else if (field.type === "text") {
+          values[field.id] = eventGender
+        }
+      }
+    } else if (
+      fid === "mandatory_city_state" ||
+      fid.includes("city_state") ||
+      label.includes("cidade") ||
+      label.includes("estado") ||
+      label.includes("município") ||
+      label.includes("municipio")
+    ) {
+      if (cityState) values[field.id] = cityState
+    } else if (
+      fid === "mandatory_birth_date" ||
+      fid.includes("birth_date") ||
+      label.includes("nascimento") ||
+      fid.includes("birth")
+    ) {
+      if (profile.birth_date) values[field.id] = profile.birth_date
+    } else if (
+      field.validationPreset === "cpf" ||
+      fid.includes("cpf") ||
+      label.includes("cpf")
+    ) {
+      if (cpfFormatted) values[field.id] = cpfFormatted
+    } else if (
+      fid.includes("restric") ||
+      fid.includes("alerg") ||
+      fid.includes("diet") ||
+      label.includes("restriç") ||
+      label.includes("restric") ||
+      label.includes("alergia") ||
+      label.includes("alimentar")
+    ) {
+      if (profile.dietary_restrictions) {
+        values[field.id] = profile.dietary_restrictions
+      }
+    } else if (
+      fid.includes("emergen") ||
+      label.includes("emergência") ||
+      label.includes("emergencia")
+    ) {
+      if (profile.emergency_contact) {
+        values[field.id] = profile.emergency_contact
+      }
+    }
+  })
+
+  return values
+}
+
 export default function FormResponder() {
   const navigate = useNavigate()
   const { formId } = useParams<{ formId: string }>()
@@ -52,8 +208,25 @@ export default function FormResponder() {
   const [authLoading, setAuthLoading] = useState(true)
   const [associatedEventTitle, setAssociatedEventTitle] = useState<string | null>(null)
   const [closedReason, setClosedReason] = useState<"draft" | "expired" | "full" | "ended" | "manual" | null>(null)
-  const [associatedRetreat, setAssociatedRetreat] = useState<any | null>(null)
+  const [associatedRetreat, setAssociatedRetreat] = useState<{
+    id: string
+    title: string
+    status: string | null
+    start_date: string | null
+    end_date: string | null
+    max_participants: number | null
+    registration_deadline: string | null
+    price: number | null
+    has_payment?: boolean | null
+    location_text: string | null
+    description: string | null
+    image_url: string | null
+  } | null>(null)
   const [profileId, setProfileId] = useState<string | null>(null)
+  const [userProfile, setUserProfile] = useState<ResponderProfile | null>(null)
+  const [submittedGuestPrefill, setSubmittedGuestPrefill] =
+    useState<GuestRegistrationPrefill | null>(null)
+  const prefilledForFormRef = useRef<string | null>(null)
 
   // Presentation page & coupon states
   const [showPresentation, setShowPresentation] = useState(false)
@@ -98,11 +271,14 @@ export default function FormResponder() {
           setUser(session.user)
           const { data: profileData } = await supabase
             .from("profiles")
-            .select("id, is_dev, is_presbyter, can_post")
+            .select(
+              "id, full_name, email, phone, cpf, birth_date, gender, city_state, address_city, address_state, dietary_restrictions, emergency_contact, is_dev, is_presbyter, can_post"
+            )
             .eq("user_id", session.user.id)
             .single()
 
           if (profileData) {
+            setUserProfile(profileData)
             setProfileId(profileData.id)
             setCanPost(
               !!(
@@ -114,6 +290,8 @@ export default function FormResponder() {
           }
         } else {
           setUser(null)
+          setUserProfile(null)
+          setProfileId(null)
         }
       } catch (err) {
         console.error("Error checking permissions", err)
@@ -130,6 +308,8 @@ export default function FormResponder() {
         setUser(session.user)
       } else {
         setUser(null)
+        setUserProfile(null)
+        setProfileId(null)
         setCanPost(false)
       }
     })
@@ -138,6 +318,36 @@ export default function FormResponder() {
       subscription.unsubscribe()
     }
   }, [])
+
+  // Auto-fill matching public/retreat form fields for logged-in participants
+  useEffect(() => {
+    if (!formTemplate || !userProfile) return
+    const key = `${formTemplate.id}:${userProfile.id}`
+    if (prefilledForFormRef.current === key) return
+
+    const autoFilled = buildAutoFilledFormValues(
+      formTemplate.fields,
+      userProfile,
+      user?.email
+    )
+    prefilledForFormRef.current = key
+
+    if (Object.keys(autoFilled).length > 0) {
+      setFormData((prev) => {
+        const next = { ...prev }
+        for (const [fieldId, val] of Object.entries(autoFilled)) {
+          if (
+            next[fieldId] === undefined ||
+            next[fieldId] === null ||
+            next[fieldId] === ""
+          ) {
+            next[fieldId] = val
+          }
+        }
+        return next
+      })
+    }
+  }, [formTemplate, userProfile, user?.email])
 
   // Load the specific form template from Supabase
   useEffect(() => {
@@ -357,14 +567,16 @@ export default function FormResponder() {
   }, [])
 
   // Validate coupon when code is present
+  const activeFormTemplateId = formTemplate?.id
+  const activeRetreatId = associatedRetreat?.id
   useEffect(() => {
-    if (!couponCode || !formTemplate) return
+    if (!couponCode || !activeFormTemplateId) return
     async function checkCoupon() {
       try {
         const { data, error } = await supabase.rpc("validate_coupon", {
           p_code: couponCode!,
-          p_form_id: formTemplate!.id,
-          p_retreat_id: associatedRetreat?.id || undefined,
+          p_form_id: activeFormTemplateId!,
+          p_retreat_id: activeRetreatId || undefined,
         })
         if (!error && data) {
           const res = data as {
@@ -422,7 +634,7 @@ export default function FormResponder() {
       }
     }
     checkCoupon()
-  }, [couponCode, formTemplate?.id, associatedRetreat?.id])
+  }, [couponCode, activeFormTemplateId, activeRetreatId])
 
   // Handle standard input updates
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -675,19 +887,69 @@ export default function FormResponder() {
     let cpfVal = ""
     let nameVal = ""
     let genderVal = ""
+    let phoneVal = ""
+    let birthDateVal = ""
+    let cityStateVal = ""
+    let dietaryVal = ""
+    let emergencyVal = ""
     template.fields.forEach((field) => {
       const val = formData[field.id]
       if (val !== undefined && val !== null && String(val).trim() !== "") {
         const label = field.label.toLowerCase()
         const fid = field.id.toLowerCase()
+        const strVal = String(val).trim()
         if (field.validationPreset === "email" || label.includes("email") || label.includes("e-mail") || fid.includes("email")) {
-          emailVal = String(val).trim().toLowerCase()
+          emailVal = strVal.toLowerCase()
         } else if (field.validationPreset === "cpf" || label.includes("cpf") || fid.includes("cpf")) {
-          cpfVal = String(val).replace(/\D/g, "")
-        } else if (label.includes("nome") || fid.includes("name")) {
-          nameVal = String(val).trim()
+          cpfVal = strVal.replace(/\D/g, "")
+        } else if (isParticipantNameField(field) && (!nameVal || fid === "mandatory_full_name")) {
+          nameVal = strVal
         } else if (label.includes("sexo") || label.includes("gênero") || label.includes("genero") || fid.includes("gender") || fid.includes("sexo")) {
-          genderVal = String(val).trim()
+          genderVal = strVal
+        } else if (
+          (fid === "mandatory_phone" ||
+            field.validationPreset === "phone" ||
+            label.includes("telefone") ||
+            label.includes("celular") ||
+            label.includes("whatsapp") ||
+            fid.includes("phone")) &&
+          !label.includes("emergên") &&
+          !label.includes("emergen") &&
+          !fid.includes("emergen")
+        ) {
+          phoneVal = strVal
+        } else if (
+          fid === "mandatory_birth_date" ||
+          fid.includes("birth_date") ||
+          label.includes("nascimento") ||
+          fid.includes("birth")
+        ) {
+          birthDateVal = strVal
+        } else if (
+          fid === "mandatory_city_state" ||
+          fid.includes("city_state") ||
+          label.includes("cidade") ||
+          label.includes("estado") ||
+          label.includes("município") ||
+          label.includes("municipio")
+        ) {
+          cityStateVal = strVal
+        } else if (
+          fid.includes("restric") ||
+          fid.includes("alerg") ||
+          fid.includes("diet") ||
+          label.includes("restriç") ||
+          label.includes("restric") ||
+          label.includes("alergia") ||
+          label.includes("alimentar")
+        ) {
+          dietaryVal = strVal
+        } else if (
+          fid.includes("emergen") ||
+          label.includes("emergência") ||
+          label.includes("emergencia")
+        ) {
+          emergencyVal = strVal
         }
       }
     })
@@ -739,20 +1001,22 @@ export default function FormResponder() {
               .in("status", ["confirmado", "presente"])
 
             if (existingRegs) {
-              const isDuplicate = existingRegs.some((reg: any) => {
+              const isDuplicate = existingRegs.some((reg) => {
+                const regGuestData = reg.guest_data as Record<string, unknown> | null
+                const regCustomResponses = reg.custom_responses as Record<string, unknown> | null
                 // Check profiles email/cpf
                 if (reg.profiles) {
                   if (emailVal && reg.profiles.email?.toLowerCase() === emailVal) return true
                   if (cpfVal && reg.profiles.cpf?.replace(/\D/g, "") === cpfVal) return true
                 }
                 // Check guest_data email/cpf
-                if (reg.guest_data) {
-                  if (emailVal && reg.guest_data.email?.toLowerCase() === emailVal) return true
-                  if (cpfVal && reg.guest_data.cpf?.replace(/\D/g, "") === cpfVal) return true
+                if (regGuestData) {
+                  if (emailVal && typeof regGuestData.email === "string" && regGuestData.email.toLowerCase() === emailVal) return true
+                  if (cpfVal && typeof regGuestData.cpf === "string" && regGuestData.cpf.replace(/\D/g, "") === cpfVal) return true
                 }
                 // Check custom_responses keys/values
-                if (reg.custom_responses) {
-                  for (const [key, val] of Object.entries(reg.custom_responses)) {
+                if (regCustomResponses) {
+                  for (const [key, val] of Object.entries(regCustomResponses)) {
                     const label = key.toLowerCase()
                     if (label.includes("email") || label.includes("e-mail")) {
                       if (emailVal && typeof val === "string" && val.toLowerCase() === emailVal) return true
@@ -779,9 +1043,10 @@ export default function FormResponder() {
               .eq("form_id", template.id)
 
             if (existingSubmissions) {
-              const isDuplicate = existingSubmissions.some((sub: any) => {
-                if (sub.data) {
-                  for (const [key, val] of Object.entries(sub.data)) {
+              const isDuplicate = existingSubmissions.some((sub) => {
+                const subData = sub.data as Record<string, unknown> | null
+                if (subData && typeof subData === "object") {
+                  for (const [key, val] of Object.entries(subData)) {
                     const field = template.fields.find(f => f.id === key)
                     if (field) {
                       const label = field.label.toLowerCase()
@@ -818,6 +1083,7 @@ export default function FormResponder() {
         // If this form is associated with a retreat, create a registration as well!
         if (associatedRetreat) {
           // Map custom responses field IDs to their labels for easy display in registrations
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const mappedResponses: Record<string, any> = {}
           template.fields.forEach((field) => {
             if (
@@ -829,33 +1095,59 @@ export default function FormResponder() {
           })
 
           // Extract basic participant details from form fields to build guest_data
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const guestData: Record<string, any> = {}
           template.fields.forEach((field) => {
             const val = formData[field.id]
             if (val !== undefined && val !== null) {
               const label = field.label.toLowerCase()
               const fid = field.id.toLowerCase()
-              if (label.includes("nome") || fid.includes("name")) {
+              if (isParticipantNameField(field) && (!guestData.full_name || fid === "mandatory_full_name")) {
                 guestData.full_name = val
               } else if (label.includes("email") || label.includes("e-mail") || fid.includes("email")) {
                 guestData.email = val
-              } else if (label.includes("telefone") || label.includes("celular") || label.includes("fone") || label.includes("whatsapp") || fid.includes("phone")) {
+              } else if (
+                (label.includes("telefone") || label.includes("celular") || label.includes("fone") || label.includes("whatsapp") || fid.includes("phone")) &&
+                !label.includes("emergên") &&
+                !label.includes("emergen") &&
+                !fid.includes("emergen")
+              ) {
                 guestData.phone = val
               } else if (label.includes("sexo") || label.includes("gênero") || label.includes("genero") || fid.includes("gender") || fid.includes("sexo")) {
                 guestData.gender = val
               } else if (label.includes("cpf") || fid.includes("cpf")) {
                 guestData.cpf = val
+              } else if (
+                fid === "mandatory_city_state" ||
+                fid.includes("city_state") ||
+                label.includes("cidade") ||
+                label.includes("estado")
+              ) {
+                guestData.city_state = val
+              } else if (
+                fid === "mandatory_birth_date" ||
+                fid.includes("birth_date") ||
+                label.includes("nascimento")
+              ) {
+                guestData.birth_date = val
               }
             }
           })
 
           if (!guestData.full_name && nameVal) guestData.full_name = nameVal
           if (!guestData.email && emailVal) guestData.email = emailVal
+          if (!guestData.phone && phoneVal) guestData.phone = phoneVal
           if (!guestData.cpf && (cpfVal || couponCpf)) {
             guestData.cpf = (cpfVal || couponCpf).replace(/\D/g, "")
           }
           if (!guestData.gender) {
             guestData.gender = genderVal || "Não informado"
+          }
+          if (!guestData.city_state && cityStateVal) {
+            guestData.city_state = cityStateVal
+          }
+          if (!guestData.birth_date && birthDateVal) {
+            guestData.birth_date = birthDateVal
           }
 
           const teamToStamp =
@@ -891,13 +1183,31 @@ export default function FormResponder() {
           }
         }
 
+        if (!user && associatedRetreat) {
+          const guestPrefill: GuestRegistrationPrefill = {
+            fullName: nameVal || undefined,
+            email: emailVal || undefined,
+            phone: phoneVal || undefined,
+            cpf: cpfVal || couponCpf.replace(/\D/g, "") || undefined,
+            birthDate: birthDateVal || undefined,
+            gender: genderVal || undefined,
+            cityState: cityStateVal || undefined,
+            dietaryRestrictions: dietaryVal || undefined,
+            emergencyContact: emergencyVal || undefined,
+            retreatTitle: associatedRetreat.title || undefined,
+          }
+          saveGuestPrefillToSession(guestPrefill)
+          setSubmittedGuestPrefill(guestPrefill)
+        }
+
         toast.dismiss(submitToastId)
         setSubmitted(true)
         toast.success("Resposta enviada com sucesso!")
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("Error saving form response to Supabase:", e)
+        const errMessage = e instanceof Error ? e.message : "Erro desconhecido"
         toast.error(
-          `Ocorreu um erro ao enviar suas respostas: ${e.message || "Erro desconhecido"}`
+          `Ocorreu um erro ao enviar suas respostas: ${errMessage}`
         )
       }
     }
@@ -1024,9 +1334,10 @@ export default function FormResponder() {
         setCheckoutPrice(discountedTotal)
         setShowCheckout(true)
         return
-      } catch (err: any) {
+      } catch (err: unknown) {
         toast.dismiss(redeemToastId)
-        toast.error("Falha ao processar código: " + err.message)
+        const errMessage = err instanceof Error ? err.message : "Erro desconhecido"
+        toast.error("Falha ao processar código: " + errMessage)
         return
       }
     }
@@ -1059,8 +1370,9 @@ export default function FormResponder() {
         setShowCheckout(false)
         setProcessingPayment(false)
         setPendingSubmission(null)
-      } catch (err: any) {
-        toast.error("Erro ao processar pagamento: " + err.message)
+      } catch (err: unknown) {
+        const errMessage = err instanceof Error ? err.message : "Erro desconhecido"
+        toast.error("Erro ao processar pagamento: " + errMessage)
         setProcessingPayment(false)
       }
     }, 2500)
@@ -1069,6 +1381,7 @@ export default function FormResponder() {
   const handleReset = () => {
     setFormData({})
     setFormErrors({})
+    setSubmittedGuestPrefill(null)
     setSubmitted(false)
   }
 
@@ -1129,8 +1442,11 @@ export default function FormResponder() {
           <EventWaitlistForm
             retreat={associatedRetreat}
             initialData={{
-              fullName: user?.user_metadata?.full_name || "",
-              email: user?.email || "",
+              fullName: userProfile?.full_name || user?.user_metadata?.full_name || "",
+              email: userProfile?.email || user?.email || "",
+              phone: normalizeNationalPhoneForForm(userProfile?.phone),
+              cpf: userProfile?.cpf ? formatValue(userProfile.cpf, "cpf") : "",
+              cityState: userProfile ? resolveProfileCityState(userProfile) : "",
             }}
             onCancel={() => navigate(-1)}
           />
@@ -1219,7 +1535,7 @@ export default function FormResponder() {
 
       {/* SUCCESS STATE CARD */}
       {submitted ? (
-        <div className="mx-auto max-w-md animate-in space-y-6 rounded-2xl border border-border/60 bg-card/25 p-8 text-center shadow-sm duration-300 zoom-in-95">
+        <div className="mx-auto max-w-md animate-in space-y-6 rounded-2xl border border-border/60 bg-card/25 p-6 sm:p-8 text-center shadow-sm duration-300 zoom-in-95">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-600">
             <CheckCircle2 className="h-8 w-8" />
           </div>
@@ -1229,23 +1545,65 @@ export default function FormResponder() {
               Resposta Enviada!
             </h2>
             <p className="mx-auto max-w-xs text-sm leading-relaxed text-muted-foreground">
-              Obrigado por preencher o formulário **{formTemplate.name}**. Suas
+              Obrigado por preencher o formulário <strong>{formTemplate.name}</strong>. Suas
               respostas foram registradas com sucesso.
             </p>
           </div>
 
-          <div className="flex flex-col gap-3 pt-4">
+          {!user && associatedRetreat && (
+            <div className="rounded-xl border border-primary/25 bg-primary/5 p-4 text-left space-y-3">
+              <div className="flex items-start gap-2.5">
+                <UserPlus className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    Salve seus dados para os próximos retiros
+                  </p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Crie sua conta de participante com as informações que você acabou de enviar. Suas inscrições serão vinculadas automaticamente e os próximos cadastros virão preenchidos.
+                  </p>
+                </div>
+              </div>
+              <Button
+                asChild
+                className="min-h-[44px] w-full cursor-pointer rounded-md bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90"
+              >
+                <Link
+                  to={buildSignUpUrlWithPrefill(
+                    submittedGuestPrefill || {},
+                    "/eventos"
+                  )}
+                >
+                  Criar conta com meus dados
+                </Link>
+              </Button>
+              <p className="text-center text-xs text-muted-foreground">
+                Já possui conta?{" "}
+                <Link
+                  to={`/entrar?redirect=${encodeURIComponent("/eventos")}${
+                    submittedGuestPrefill?.email
+                      ? `&email=${encodeURIComponent(submittedGuestPrefill.email)}`
+                      : ""
+                  }`}
+                  className="font-medium text-primary hover:underline"
+                >
+                  Entrar e vincular inscrição
+                </Link>
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 pt-2">
             <Button
               onClick={handleReset}
               variant="outline"
-              className="h-11 w-full cursor-pointer rounded-md text-sm font-semibold"
+              className="min-h-[44px] w-full cursor-pointer rounded-md text-sm font-semibold"
             >
               Enviar outra resposta
             </Button>
             {user && (
               <Button
                 asChild
-                className="h-11 w-full cursor-pointer rounded-md bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90"
+                className="min-h-[44px] w-full cursor-pointer rounded-md bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90"
               >
                 <Link to={canPost ? "/gestao/formularios" : "/"}>Concluir</Link>
               </Button>
