@@ -26,6 +26,7 @@ const Profile = lazy(() => import("./pages/Profile"))
 const CreatePost = lazy(() => import("./pages/CreatePost"))
 const Ensinos = lazy(() => import("./pages/Ensinos"))
 const Events = lazy(() => import("./pages/Events"))
+const ParticipantPortal = lazy(() => import("./pages/ParticipantPortal"))
 const ManageEvents = lazy(() => import("./pages/ManageEvents"))
 const ManageEventDetail = lazy(() => import("./pages/ManageEventDetail"))
 const Messages = lazy(() => import("./pages/Messages"))
@@ -230,6 +231,7 @@ function App() {
             <Route path="/cadastro" element={<SignUp />} />
             <Route path="/formularios/responder/:formId" element={<FormResponder />} />
             <Route path="/formularios/:formId" element={<FormResponder />} />
+            <Route path="/inscricao/:token" element={<ParticipantPortal />} />
 
             {/* Rota do Modo Link Exclusivo do Grupo */}
             <Route
@@ -250,6 +252,7 @@ function App() {
               <Route path="/noticias/nova" element={<CreatePost />} />
               <Route path="/perfil" element={<Profile />} />
               <Route path="/eventos" element={<Events />} />
+              <Route path="/eventos/inscricao/:registrationId" element={<ParticipantPortal />} />
               <Route path="/mensagens" element={<Messages />} />
 
               <Route

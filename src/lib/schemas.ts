@@ -235,3 +235,81 @@ export const postSchema = z.object({
   eventLabel: z.string().nullable().optional(),
 })
 export type PostValue = z.infer<typeof postSchema>
+
+export const flightDetailsSchema = z.object({
+  arrivalAirline: z
+    .string()
+    .trim()
+    .min(2, { message: "Informe a companhia aérea de chegada." }),
+  arrivalFlightNumber: z
+    .string()
+    .trim()
+    .min(2, { message: "Informe o número do voo de chegada." }),
+  arrivalAirport: z
+    .string()
+    .trim()
+    .min(2, { message: "Informe o aeroporto de chegada (ex: CNF, PLU)." }),
+  arrivalDateTime: z
+    .string()
+    .trim()
+    .min(1, { message: "Informe a data e horário de chegada." }),
+  departureAirline: z.string().trim().optional().or(z.literal("")),
+  departureFlightNumber: z.string().trim().optional().or(z.literal("")),
+  departureDateTime: z.string().trim().optional().or(z.literal("")),
+  needsAirportTransfer: z.boolean(),
+  notes: z
+    .string()
+    .trim()
+    .max(500, { message: "Observações devem ter no máximo 500 caracteres." })
+    .optional()
+    .or(z.literal("")),
+})
+export type FlightDetailsValue = z.infer<typeof flightDetailsSchema>
+
+export const portalMessageSchema = z.object({
+  message: z
+    .string()
+    .trim()
+    .min(2, { message: "Escreva uma mensagem com pelo menos 2 caracteres." })
+    .max(2000, { message: "A mensagem deve ter no máximo 2000 caracteres." }),
+})
+export type PortalMessageValue = z.infer<typeof portalMessageSchema>
+
+export const cancelAndRefundSchema = z
+  .object({
+    reason: z
+      .string()
+      .trim()
+      .max(500, { message: "O motivo deve ter no máximo 500 caracteres." })
+      .optional()
+      .or(z.literal("")),
+    requestRefund: z.boolean(),
+    pixKey: z.string().trim().optional().or(z.literal("")),
+  })
+  .superRefine((data, ctx) => {
+    if (data.requestRefund && (!data.pixKey || data.pixKey.trim().length < 3)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["pixKey"],
+        message: "Informe uma chave PIX válida para receber o reembolso.",
+      })
+    }
+  })
+export type CancelAndRefundValue = z.infer<typeof cancelAndRefundSchema>
+
+export const manageRefundSchema = z.object({
+  refundStatus: z.enum([
+    "pendente",
+    "em_analise",
+    "aprovado",
+    "recusado",
+    "reembolsado",
+  ] as const),
+  refundNotes: z
+    .string()
+    .trim()
+    .max(1000, { message: "As observações devem ter no máximo 1000 caracteres." })
+    .optional()
+    .or(z.literal("")),
+})
+export type ManageRefundValue = z.infer<typeof manageRefundSchema>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import supabase from "@/lib/supabase"
 import {
   Calendar,
@@ -16,6 +17,7 @@ import {
   QrCode,
   AlertTriangle,
   XCircle,
+  ExternalLink,
 } from "lucide-react"
 import {
   Card,
@@ -52,7 +54,9 @@ import {
   calculateTotalPrice,
 } from "@/lib/forms"
 import type { FormField } from "@/lib/forms"
-import type { Database } from "@/lib/database.types"
+import type { Database, Json } from "@/lib/database.types"
+import { REFUND_STATUS_CONFIG } from "@/constants/colors"
+import { generatePortalToken } from "@/lib/participantPortal"
 import { formatDateBR } from "@/lib/utils"
 import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { EventWaitlistDialog } from "@/components/events/EventWaitlistDialog"
@@ -103,9 +107,9 @@ export default function Events() {
   const [guestErrors, setGuestErrors] = useState<Record<string, string>>({})
 
   // Step 2 Form Data (Dynamic Form Responses)
-  const [customResponses, setCustomResponses] = useState<Record<string, any>>(
-    {}
-  )
+  const [customResponses, setCustomResponses] = useState<
+    Record<string, string | number | string[]>
+  >({})
   const [customFormFields, setCustomFormFields] = useState<FormField[]>([])
   const [loadingForm, setLoadingForm] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
@@ -282,7 +286,7 @@ export default function Events() {
         setCustomFormFields(fields)
 
         // Initialize responses structure
-        const initialResponses: Record<string, any> = {}
+        const initialResponses: Record<string, string | number | string[]> = {}
         fields.forEach((f) => {
           initialResponses[f.id] = f.type === "checkbox" ? [] : ""
         })
@@ -371,7 +375,7 @@ export default function Events() {
       // Required check
       if (field.required) {
         if (field.type === "checkbox") {
-          if (!val || val.length === 0) {
+          if (!Array.isArray(val) || val.length === 0) {
             errors[field.id] = `${field.label} é obrigatório.`
           }
         } else if (typeof val === "string" && !val.trim()) {
@@ -458,7 +462,7 @@ export default function Events() {
 
           formSubmissionId = `sub-${Math.random().toString(36).substring(7)}`
 
-          const filteredData: Record<string, any> = {}
+          const filteredData: Record<string, Json> = {}
           customFormFields.forEach((field) => {
             if (
               isFieldVisible(field, customResponses, customFormFields) &&
@@ -479,7 +483,7 @@ export default function Events() {
         }
 
         // Map custom responses field IDs to their labels for easy display
-        const mappedResponses: Record<string, any> = {}
+        const mappedResponses: Record<string, Json> = {}
         customFormFields.forEach((field) => {
           if (isFieldVisible(field, customResponses, customFormFields)) {
             mappedResponses[field.label] = customResponses[field.id]
@@ -496,6 +500,7 @@ export default function Events() {
           notes: notes.trim() || null,
           paid: paid,
           form_submission_id: formSubmissionId,
+          portal_token: generatePortalToken(),
           status: "confirmado" as const,
         }
 
@@ -924,7 +929,7 @@ export default function Events() {
 
                         {field.type === "select" && (
                           <Select
-                            value={customResponses[field.id] || "none"}
+                            value={String(customResponses[field.id] || "none")}
                             onValueChange={(val) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -948,7 +953,7 @@ export default function Events() {
 
                         {field.type === "radio" && (
                           <RadioGroup
-                            value={customResponses[field.id] || ""}
+                            value={String(customResponses[field.id] || "")}
                             onValueChange={(val) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -974,8 +979,8 @@ export default function Events() {
                         {field.type === "checkbox" && (
                           <div className="mt-2 flex flex-col gap-2.5">
                             {field.options.map((opt) => {
-                              const checkedList =
-                                customResponses[field.id] || []
+                              const rawList = customResponses[field.id]
+                              const checkedList = Array.isArray(rawList) ? rawList : []
                               const isChecked = checkedList.includes(opt)
                               return (
                                 <div key={opt} className="flex items-center gap-2">
@@ -1335,8 +1340,19 @@ export default function Events() {
                         </span>
                       </div>
                     )}
+                    {reg.refund_requested && reg.refund_status && (
+                      <div className="flex items-center justify-between text-[11px] border-t border-border/10 pt-1.5">
+                        <span>Reembolso:</span>
+                        <Badge
+                          variant="outline"
+                          className={REFUND_STATUS_CONFIG[reg.refund_status].className}
+                        >
+                          {REFUND_STATUS_CONFIG[reg.refund_status].label}
+                        </Badge>
+                      </div>
+                    )}
                   </CardContent>
-                  <CardFooter className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-5 pt-3 border-t border-border/10 bg-muted/10">
+                  <CardFooter className="flex flex-col items-stretch gap-3 p-5 pt-3 border-t border-border/10 bg-muted/10">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium">
                       {isCancelled ? (
                         <div className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
@@ -1360,17 +1376,28 @@ export default function Events() {
                         </div>
                       )}
                     </div>
-                    {!isCancelled && (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
                       <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenCancelDialog(reg)}
-                        className="min-h-[44px] h-9 px-3 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-500/10 dark:text-red-400 cursor-pointer self-end sm:self-auto shrink-0"
+                        asChild
+                        className="min-h-[44px] flex-1 font-semibold"
                       >
-                        Cancelar Inscrição
+                        <Link to={`/eventos/inscricao/${reg.id}`}>
+                          <ExternalLink data-icon="inline-start" />
+                          Acessar Área do Inscrito
+                        </Link>
                       </Button>
-                    )}
+                      {!isCancelled && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleOpenCancelDialog(reg)}
+                          className="min-h-[44px] px-3 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-500/10 dark:text-red-400 cursor-pointer shrink-0"
+                        >
+                          Cancelar Inscrição
+                        </Button>
+                      )}
+                    </div>
                   </CardFooter>
                 </Card>
               )

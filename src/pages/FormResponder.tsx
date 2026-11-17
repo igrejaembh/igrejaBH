@@ -11,6 +11,9 @@ import {
   QrCode,
   Lock,
   Ticket,
+  Copy,
+  Check,
+  ExternalLink,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -35,7 +38,25 @@ import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { Layout } from "@/components/layout/Layout"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { parseEndOfDay } from "@/lib/utils"
+import { generatePortalToken } from "@/lib/participantPortal"
+import type { Json } from "@/lib/database.types"
 import type { User } from "@supabase/supabase-js"
+
+interface AssociatedRetreatInfo {
+  id: string
+  title: string
+  status: string | null
+  start_date: string | null
+  end_date: string | null
+  max_participants: number | null
+  registration_deadline: string | null
+  price: number | null
+  has_payment: boolean | null
+  location_text: string | null
+  description: string | null
+  image_url: string | null
+  [key: string]: unknown
+}
 
 export default function FormResponder() {
   const navigate = useNavigate()
@@ -47,12 +68,14 @@ export default function FormResponder() {
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
+  const [submittedPortalToken, setSubmittedPortalToken] = useState<string | null>(null)
+  const [copiedPortalLink, setCopiedPortalLink] = useState(false)
   const [canPost, setCanPost] = useState(false)
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [associatedEventTitle, setAssociatedEventTitle] = useState<string | null>(null)
   const [closedReason, setClosedReason] = useState<"draft" | "expired" | "full" | "ended" | "manual" | null>(null)
-  const [associatedRetreat, setAssociatedRetreat] = useState<any | null>(null)
+  const [associatedRetreat, setAssociatedRetreat] = useState<AssociatedRetreatInfo | null>(null)
   const [profileId, setProfileId] = useState<string | null>(null)
 
   // Presentation page & coupon states
@@ -739,20 +762,22 @@ export default function FormResponder() {
               .in("status", ["confirmado", "presente"])
 
             if (existingRegs) {
-              const isDuplicate = existingRegs.some((reg: any) => {
+              const isDuplicate = existingRegs.some((reg) => {
                 // Check profiles email/cpf
                 if (reg.profiles) {
                   if (emailVal && reg.profiles.email?.toLowerCase() === emailVal) return true
                   if (cpfVal && reg.profiles.cpf?.replace(/\D/g, "") === cpfVal) return true
                 }
                 // Check guest_data email/cpf
-                if (reg.guest_data) {
-                  if (emailVal && reg.guest_data.email?.toLowerCase() === emailVal) return true
-                  if (cpfVal && reg.guest_data.cpf?.replace(/\D/g, "") === cpfVal) return true
+                const gData = reg.guest_data as Record<string, unknown> | null
+                if (gData) {
+                  if (emailVal && typeof gData.email === "string" && gData.email.toLowerCase() === emailVal) return true
+                  if (cpfVal && typeof gData.cpf === "string" && gData.cpf.replace(/\D/g, "") === cpfVal) return true
                 }
                 // Check custom_responses keys/values
-                if (reg.custom_responses) {
-                  for (const [key, val] of Object.entries(reg.custom_responses)) {
+                const cResp = reg.custom_responses as Record<string, unknown> | null
+                if (cResp) {
+                  for (const [key, val] of Object.entries(cResp)) {
                     const label = key.toLowerCase()
                     if (label.includes("email") || label.includes("e-mail")) {
                       if (emailVal && typeof val === "string" && val.toLowerCase() === emailVal) return true
@@ -779,9 +804,9 @@ export default function FormResponder() {
               .eq("form_id", template.id)
 
             if (existingSubmissions) {
-              const isDuplicate = existingSubmissions.some((sub: any) => {
-                if (sub.data) {
-                  for (const [key, val] of Object.entries(sub.data)) {
+              const isDuplicate = existingSubmissions.some((sub) => {
+                if (sub.data && typeof sub.data === "object" && !Array.isArray(sub.data)) {
+                  for (const [key, val] of Object.entries(sub.data as Record<string, unknown>)) {
                     const field = template.fields.find(f => f.id === key)
                     if (field) {
                       const label = field.label.toLowerCase()
@@ -815,21 +840,23 @@ export default function FormResponder() {
 
         if (error) throw error
 
+        let createdPortalToken: string | null = null
+
         // If this form is associated with a retreat, create a registration as well!
         if (associatedRetreat) {
           // Map custom responses field IDs to their labels for easy display in registrations
-          const mappedResponses: Record<string, any> = {}
+          const mappedResponses: Record<string, Json> = {}
           template.fields.forEach((field) => {
             if (
               isFieldVisible(field, formData, template.fields) &&
               formData[field.id] !== undefined
             ) {
-              mappedResponses[field.label] = formData[field.id]
+              mappedResponses[field.label] = formData[field.id] as Json
             }
           })
 
           // Extract basic participant details from form fields to build guest_data
-          const guestData: Record<string, any> = {}
+          const guestData: Record<string, Json> = {}
           template.fields.forEach((field) => {
             const val = formData[field.id]
             if (val !== undefined && val !== null) {
@@ -860,6 +887,7 @@ export default function FormResponder() {
 
           const teamToStamp =
             assignedServiceTeam || couponValidation.targetServiceTeam || null
+          const portalToken = generatePortalToken()
 
           const { error: regError } = await supabase.from("registrations").insert({
             retreat_id: associatedRetreat.id,
@@ -871,10 +899,12 @@ export default function FormResponder() {
             paid: paid,
             service_team: teamToStamp,
             form_submission_id: submissionId,
+            portal_token: portalToken,
             status: "confirmado",
           })
 
           if (regError) throw regError
+          createdPortalToken = portalToken
 
           // Se o participante veio com link de chamada da lista de espera, marcar como inscrito
           const urlParams = new URLSearchParams(window.location.search)
@@ -892,13 +922,13 @@ export default function FormResponder() {
         }
 
         toast.dismiss(submitToastId)
+        setSubmittedPortalToken(createdPortalToken)
         setSubmitted(true)
         toast.success("Resposta enviada com sucesso!")
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Erro desconhecido"
         console.error("Error saving form response to Supabase:", e)
-        toast.error(
-          `Ocorreu um erro ao enviar suas respostas: ${e.message || "Erro desconhecido"}`
-        )
+        toast.error(`Ocorreu um erro ao enviar suas respostas: ${msg}`)
       }
     }
 
@@ -1024,9 +1054,10 @@ export default function FormResponder() {
         setCheckoutPrice(discountedTotal)
         setShowCheckout(true)
         return
-      } catch (err: any) {
+      } catch (err: unknown) {
         toast.dismiss(redeemToastId)
-        toast.error("Falha ao processar código: " + err.message)
+        const msg = err instanceof Error ? err.message : "Erro desconhecido"
+        toast.error("Falha ao processar código: " + msg)
         return
       }
     }
@@ -1059,8 +1090,9 @@ export default function FormResponder() {
         setShowCheckout(false)
         setProcessingPayment(false)
         setPendingSubmission(null)
-      } catch (err: any) {
-        toast.error("Erro ao processar pagamento: " + err.message)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Erro desconhecido"
+        toast.error("Erro ao processar pagamento: " + msg)
         setProcessingPayment(false)
       }
     }, 2500)
@@ -1069,6 +1101,8 @@ export default function FormResponder() {
   const handleReset = () => {
     setFormData({})
     setFormErrors({})
+    setSubmittedPortalToken(null)
+    setCopiedPortalLink(false)
     setSubmitted(false)
   }
 
@@ -1219,7 +1253,7 @@ export default function FormResponder() {
 
       {/* SUCCESS STATE CARD */}
       {submitted ? (
-        <div className="mx-auto max-w-md animate-in space-y-6 rounded-2xl border border-border/60 bg-card/25 p-8 text-center shadow-sm duration-300 zoom-in-95">
+        <div className="mx-auto max-w-lg animate-in space-y-6 rounded-2xl border border-border/60 bg-card/25 p-6 sm:p-8 text-center shadow-sm duration-300 zoom-in-95">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-600">
             <CheckCircle2 className="h-8 w-8" />
           </div>
@@ -1228,24 +1262,77 @@ export default function FormResponder() {
             <h2 className="text-2xl font-bold text-foreground">
               Resposta Enviada!
             </h2>
-            <p className="mx-auto max-w-xs text-sm leading-relaxed text-muted-foreground">
-              Obrigado por preencher o formulário **{formTemplate.name}**. Suas
+            <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">
+              Obrigado por preencher o formulário <strong>{formTemplate.name}</strong>. Suas
               respostas foram registradas com sucesso.
             </p>
           </div>
 
-          <div className="flex flex-col gap-3 pt-4">
+          {submittedPortalToken && (
+            <div className="rounded-xl border border-border bg-muted/30 p-4 text-left space-y-3">
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-foreground">
+                  Seu Portal do Inscrito está pronto
+                </p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Guarde este link exclusivo para conferir suas respostas, ler comunicados
+                  do evento, enviar dúvidas aos organizadores, informar dados de voo ou
+                  gerenciar sua inscrição.
+                </p>
+              </div>
+
+              <Button
+                asChild
+                className="min-h-[44px] w-full font-semibold"
+              >
+                <Link to={`/inscricao/${submittedPortalToken}`}>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Acessar Área do Inscrito
+                </Link>
+              </Button>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  readOnly
+                  aria-label="Link exclusivo da Área do Inscrito"
+                  value={`${window.location.origin}/inscricao/${submittedPortalToken}`}
+                  className="min-h-[44px] font-mono text-xs bg-background"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={async () => {
+                    const url = `${window.location.origin}/inscricao/${submittedPortalToken}`
+                    await navigator.clipboard.writeText(url)
+                    setCopiedPortalLink(true)
+                    toast.success("Link do Portal do Inscrito copiado!")
+                    setTimeout(() => setCopiedPortalLink(false), 2500)
+                  }}
+                  className="min-h-[44px] shrink-0 font-semibold"
+                >
+                  {copiedPortalLink ? (
+                    <Check className="mr-1.5 h-4 w-4" />
+                  ) : (
+                    <Copy className="mr-1.5 h-4 w-4" />
+                  )}
+                  {copiedPortalLink ? "Copiado" : "Copiar Link"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 pt-2">
             <Button
               onClick={handleReset}
               variant="outline"
-              className="h-11 w-full cursor-pointer rounded-md text-sm font-semibold"
+              className="min-h-[44px] w-full cursor-pointer rounded-md text-sm font-semibold"
             >
               Enviar outra resposta
             </Button>
             {user && (
               <Button
                 asChild
-                className="h-11 w-full cursor-pointer rounded-md bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90"
+                className="min-h-[44px] w-full cursor-pointer rounded-md bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90"
               >
                 <Link to={canPost ? "/gestao/formularios" : "/"}>Concluir</Link>
               </Button>
