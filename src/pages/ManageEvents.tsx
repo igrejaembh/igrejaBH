@@ -8,18 +8,24 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EventCard, type RetreatWithForm } from "@/components/events/EventCard";
 import { CreateEditEventDialog, type FormOption } from "@/components/events/CreateEditEventDialog";
+import {
+  getBatchRegistrationCounts,
+  type RetreatBatch,
+} from "@/lib/retreatBatches";
 import type { Database } from "@/lib/database.types";
 
 type Retreat = Database["public"]["Tables"]["retreats"]["Row"];
 
 type RetreatQueryResult = Retreat & {
   forms: { name: string } | null;
-  registrations: { id: string; status?: string | null }[] | null;
+  retreat_batches: RetreatBatch[] | null;
+  registrations: { id: string; status?: string | null; batch_id?: string | null }[] | null;
 };
 
 export default function ManageEvents() {
   const [retreats, setRetreats] = useState<RetreatWithForm[]>([]);
   const [registrationCounts, setRegistrationCounts] = useState<Record<string, number>>({});
+  const [batchCountsByRetreat, setBatchCountsByRetreat] = useState<Record<string, Record<string, number>>>({});
   const [forms, setForms] = useState<FormOption[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -46,9 +52,13 @@ export default function ManageEvents() {
           forms (
             name
           ),
+          retreat_batches (
+            *
+          ),
           registrations (
             id,
-            status
+            status,
+            batch_id
           )
         `)
         .order("start_date", { ascending: true });
@@ -57,12 +67,14 @@ export default function ManageEvents() {
 
       const rawList = (retreatsData as unknown as RetreatQueryResult[]) || [];
       const counts: Record<string, number> = {};
+      const nextBatchCounts: Record<string, Record<string, number>> = {};
       const formattedRetreats: RetreatWithForm[] = rawList.map((r) => {
         const activeRegistrations = (r.registrations || []).filter(
           (reg) => (reg.status || "confirmado") !== "cancelado"
         );
         const count = activeRegistrations.length;
         counts[r.id] = count;
+        nextBatchCounts[r.id] = getBatchRegistrationCounts(r.registrations || []);
         return {
           ...r,
           registrations_count: count,
@@ -71,6 +83,7 @@ export default function ManageEvents() {
 
       setRetreats(formattedRetreats);
       setRegistrationCounts(counts);
+      setBatchCountsByRetreat(nextBatchCounts);
 
       // 2. Fetch available forms for event creation
       const { data: formsData, error: formsError } = await supabase
@@ -308,6 +321,7 @@ export default function ManageEvents() {
               key={retreat.id}
               retreat={retreat}
               registeredCount={registrationCounts[retreat.id] || 0}
+              batchCounts={batchCountsByRetreat[retreat.id] || {}}
               onEdit={handleEditClick}
               onDelete={handleDeleteClick}
               onActivate={handleActivateClick}

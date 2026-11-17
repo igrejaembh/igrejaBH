@@ -10,6 +10,7 @@ import {
   CheckCircle2, 
   FileText,
   Clock,
+  Layers,
 } from "lucide-react";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,17 +25,26 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Database } from "@/lib/database.types";
 import { parseLocalDate, formatDateBR } from "@/lib/utils";
+import {
+  resolveActiveBatch,
+  formatBatchDateTime,
+  formatBatchPriceLabel,
+  type RetreatBatch,
+} from "@/lib/retreatBatches";
+import { BATCH_STATUS_CONFIG } from "@/constants/colors";
 
 export type RetreatWithForm = Database["public"]["Tables"]["retreats"]["Row"] & {
   forms?: {
     name: string;
   } | null;
+  retreat_batches?: RetreatBatch[] | null;
   registrations_count?: number;
 };
 
 interface EventCardProps {
   retreat: RetreatWithForm;
   registeredCount?: number;
+  batchCounts?: Record<string, number>;
   onEdit?: (retreat: RetreatWithForm) => void;
   onDelete?: (retreatId: string) => void;
   onActivate?: (retreatId: string) => void;
@@ -43,6 +53,7 @@ interface EventCardProps {
 export function EventCard({
   retreat,
   registeredCount = 0,
+  batchCounts = {},
   onEdit,
   onDelete,
   onActivate,
@@ -108,13 +119,24 @@ export function EventCard({
     }
   };
 
-  const isFree = retreat.has_payment === false || !retreat.price || retreat.price === 0;
+  const batchResolution = resolveActiveBatch(
+    retreat.retreat_batches || [],
+    batchCounts,
+    new Date()
+  );
 
-  const formattedPrice = !isFree && retreat.price
+  const hasPayment = retreat.has_payment ?? ((retreat.price || 0) > 0);
+  const activeBatchPrice = batchResolution.activeBatch
+    ? (hasPayment ? Number(batchResolution.activeBatch.price) : 0)
+    : null;
+  const effectivePrice = activeBatchPrice !== null ? activeBatchPrice : (hasPayment ? (retreat.price || 0) : 0);
+  const isFree = !hasPayment || effectivePrice === 0;
+
+  const formattedPrice = !isFree
     ? new Intl.NumberFormat("pt-BR", {
         style: "currency",
         currency: "BRL",
-      }).format(retreat.price)
+      }).format(effectivePrice)
     : "Gratuito";
 
   return (
@@ -124,10 +146,44 @@ export function EventCard({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             {getStatusBadge(retreat.status)}
-            {!isFree && (
-              <span className="text-xs font-bold text-zinc-900 dark:text-zinc-50 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 rounded-full">
-                {formattedPrice}
-              </span>
+            {batchResolution.hasBatches ? (
+              batchResolution.activeBatch ? (
+                <Badge
+                  variant="outline"
+                  className={`text-[11px] font-bold px-2.5 py-0.5 ${BATCH_STATUS_CONFIG.active.badgeClass}`}
+                >
+                  {batchResolution.activeBatch.name} • {formattedPrice}
+                </Badge>
+              ) : batchResolution.nextBatch ? (
+                <Badge
+                  variant="outline"
+                  className={`text-[11px] font-bold px-2.5 py-0.5 ${BATCH_STATUS_CONFIG.upcoming.badgeClass}`}
+                >
+                  Próx: {batchResolution.nextBatch.name} •{" "}
+                  {hasPayment
+                    ? formatBatchPriceLabel(batchResolution.nextBatch.price)
+                    : "Gratuito"}
+                </Badge>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className={`text-[11px] font-bold px-2.5 py-0.5 ${
+                    batchResolution.status === "all_full"
+                      ? BATCH_STATUS_CONFIG.full.badgeClass
+                      : BATCH_STATUS_CONFIG.ended.badgeClass
+                  }`}
+                >
+                  {batchResolution.status === "all_full"
+                    ? "Lotes Esgotados"
+                    : "Lotes Encerrados"}
+                </Badge>
+              )
+            ) : (
+              !isFree && (
+                <span className="text-xs font-bold text-zinc-900 dark:text-zinc-50 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 rounded-full">
+                  {formattedPrice}
+                </span>
+              )
             )}
           </div>
 
@@ -210,11 +266,35 @@ export function EventCard({
             </div>
           )}
 
-          {retreat.registration_deadline && (
-            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-medium">
-              <Clock className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">Inscrições até: {formatDateBR(retreat.registration_deadline)}</span>
+          {batchResolution.hasBatches ? (
+            <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
+              <Layers className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="truncate">
+                {batchResolution.activeBatch
+                  ? `${batchResolution.activeBatch.name} até ${formatBatchDateTime(
+                      batchResolution.activeBatch.end_at
+                    )}${
+                      batchResolution.activeBatchInfo?.remainingSpots !== null &&
+                      batchResolution.activeBatchInfo?.remainingSpots !== undefined
+                        ? ` (${batchResolution.activeBatchInfo.remainingSpots} vagas)`
+                        : ""
+                    }`
+                  : batchResolution.nextBatch
+                  ? `${batchResolution.nextBatch.name} abre em ${formatBatchDateTime(
+                      batchResolution.nextBatch.start_at
+                    )}`
+                  : `${batchResolution.batches.length} lote(s) configurado(s) — sem lote aberto`}
+              </span>
             </div>
+          ) : (
+            retreat.registration_deadline && (
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-medium">
+                <Clock className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  Inscrições até: {formatDateBR(retreat.registration_deadline)}
+                </span>
+              </div>
+            )
           )}
         </div>
 

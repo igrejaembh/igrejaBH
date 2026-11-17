@@ -21,11 +21,19 @@ import {
   HeartHandshake,
   Printer,
   Bell,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
 import { calculateTotalPrice, type FormField } from "@/lib/forms";
 import { formatDateBR } from "@/lib/utils";
+import {
+  formatBatchDateTime,
+  formatBatchPriceLabel,
+  getBatchRegistrationCounts,
+  resolveActiveBatch,
+  type RetreatBatch,
+} from "@/lib/retreatBatches";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -59,6 +67,7 @@ import {
   EventFinanceTab,
 } from "@/components/events/EventFinanceTab";
 import { EventTeamsTab } from "@/components/events/EventTeamsTab";
+import { RetreatBatchesTab } from "@/components/events/RetreatBatchesTab";
 import { getServiceTeam } from "@/constants/serviceTeams";
 import type { Database } from "@/lib/database.types";
 import type { FilterRule, FilterLogic, KPIConfig } from "@/types/eventsFilter";
@@ -99,6 +108,7 @@ export default function ManageEventDetail() {
   const [retreat, setRetreat] = useState<Retreat | null>(null);
   const [registrations, setRegistrations] = useState<RegistrationWithDetails[]>([]);
   const [retreatRooms, setRetreatRooms] = useState<RetreatRoom[]>([]);
+  const [retreatBatches, setRetreatBatches] = useState<RetreatBatch[]>([]);
   const [selectedFormTemplate, setSelectedFormTemplate] = useState<FormTemplateShape | null>(null);
   const [forms, setForms] = useState<FormOption[]>([]);
 
@@ -111,6 +121,7 @@ export default function ManageEventDetail() {
   const [activeTab, setActiveTab] = useState<
     | "checkin"
     | "registrations"
+    | "batches"
     | "rooms"
     | "teams"
     | "finance"
@@ -344,6 +355,11 @@ export default function ManageEventDetail() {
             name,
             gender_type,
             capacity
+          ),
+          retreat_batches:retreat_batches!registrations_batch_id_fkey (
+            id,
+            name,
+            price
           )
         `)
         .eq("retreat_id", id)
@@ -369,6 +385,11 @@ export default function ManageEventDetail() {
               name,
               gender_type,
               capacity
+            ),
+            retreat_batches:retreat_batches!registrations_batch_id_fkey (
+              id,
+              name,
+              price
             )
           `)
           .eq("retreat_id", id)
@@ -412,6 +433,23 @@ export default function ManageEventDetail() {
     }
   }, []);
 
+  const fetchRetreatBatches = useCallback(async (id: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("retreat_batches")
+        .select("*")
+        .eq("retreat_id", id)
+        .order("sort_order", { ascending: true })
+        .order("start_at", { ascending: true });
+
+      if (error) throw error;
+      setRetreatBatches(data || []);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro ao carregar lotes";
+      console.error(msg);
+    }
+  }, []);
+
   const fetchWaitlistCount = useCallback(async (id: string) => {
     try {
       const { count, error } = await supabase
@@ -433,6 +471,7 @@ export default function ManageEventDetail() {
       fetchRetreatDetails(eventId);
       fetchRegistrations(eventId);
       fetchRetreatRooms(eventId);
+      fetchRetreatBatches(eventId);
       fetchForms();
       fetchHomeGroups();
       fetchWaitlistCount(eventId);
@@ -442,6 +481,7 @@ export default function ManageEventDetail() {
     fetchRetreatDetails,
     fetchRegistrations,
     fetchRetreatRooms,
+    fetchRetreatBatches,
     fetchForms,
     fetchHomeGroups,
     fetchWaitlistCount,
@@ -819,26 +859,16 @@ export default function ManageEventDetail() {
     return "indefinido";
   };
 
-  // Helper to calculate price of a registration
+  // Helper to calculate price of a registration preserving batch_price_snapshot
   const getRegPrice = useCallback(
     (reg: RegistrationWithDetails): number => {
       const method = (reg.payment_method || "").toLowerCase();
+      const basePrice =
+        reg.batch_price_snapshot !== null && reg.batch_price_snapshot !== undefined
+          ? Number(reg.batch_price_snapshot)
+          : retreat?.price || 0;
 
-      // 1. Isenção total por cupom ou evento gratuito = R$ 0,00
-      if (method === "cupom" || method === "gratuito") {
-        if (reg.payment_reference) {
-          const match = reg.payment_reference.match(/Desconto\s*\((\d+)%\)/i);
-          if (match) {
-            const pct = parseInt(match[1], 10);
-            if (pct === 100) return 0;
-            const base = retreat?.price || 0;
-            return Math.max(0, Math.round(base * (1 - pct / 100) * 100) / 100);
-          }
-        }
-        return 0;
-      }
-
-      let price = retreat?.price || 0;
+      let computedWithModifiers = basePrice;
       if (retreat?.form_id && selectedFormTemplate) {
         const customResps = reg.custom_responses as Record<string, unknown> | null;
         if (customResps) {
@@ -847,13 +877,31 @@ export default function ManageEventDetail() {
             const val = customResps[field.label];
             if (val !== undefined) idResponses[field.id] = val;
           });
-          price = calculateTotalPrice(
-            retreat.price || 0,
+          computedWithModifiers = calculateTotalPrice(
+            basePrice,
             selectedFormTemplate.fields || [],
             idResponses
           );
         }
       }
+
+      // 1. Isenção total por cupom ou evento gratuito = R$ 0,00
+      if (method === "cupom" || method === "gratuito") {
+        if (reg.payment_reference) {
+          const match = reg.payment_reference.match(/Desconto\s*\((\d+)%\)/i);
+          if (match) {
+            const pct = parseInt(match[1], 10);
+            if (pct === 100) return 0;
+            return Math.max(
+              0,
+              Math.round(computedWithModifiers * (1 - pct / 100) * 100) / 100
+            );
+          }
+        }
+        return 0;
+      }
+
+      let price = computedWithModifiers;
 
       // Check for partial coupon discount in reference (e.g. "... | Cupom: CODE (50% OFF)")
       if (reg.payment_reference) {
@@ -928,6 +976,8 @@ export default function ManageEventDetail() {
       "Telefone",
       "CPF",
       "Gênero",
+      "Lote",
+      "Valor Base Lote (R$)",
       "Valor (R$)",
       "Pago",
       "Método de Pagamento",
@@ -957,6 +1007,19 @@ export default function ManageEventDetail() {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
+
+      const batchLabel =
+        reg.retreat_batches?.name ||
+        (reg.batch_price_snapshot !== null && reg.batch_price_snapshot !== undefined
+          ? "Lote arquivado"
+          : "Padrão");
+      const batchBaseVal =
+        reg.batch_price_snapshot !== null && reg.batch_price_snapshot !== undefined
+          ? Number(reg.batch_price_snapshot).toLocaleString("pt-BR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })
+          : "";
 
       const dateStr = reg.created_at
         ? new Date(reg.created_at).toLocaleString("pt-BR")
@@ -998,6 +1061,8 @@ export default function ManageEventDetail() {
         reg.profiles?.phone || guest?.phone || "",
         reg.profiles?.cpf || guest?.cpf || "",
         genero,
+        batchLabel,
+        batchBaseVal,
         valorStr,
         reg.paid ? "Sim" : "Não",
         reg.payment_method || "",
@@ -1064,11 +1129,26 @@ export default function ManageEventDetail() {
     [retreatRooms]
   );
 
+  const batchCounts = useMemo(
+    () => getBatchRegistrationCounts(registrations),
+    [registrations]
+  );
+
+  const batchResolution = useMemo(
+    () => resolveActiveBatch(retreatBatches, batchCounts, new Date()),
+    [retreatBatches, batchCounts]
+  );
+
   // Dynamic Context Meta for KPI Builder
   const contextMeta: ContextMeta = useMemo(() => {
+    const activeBatchBase = batchResolution.activeBatch
+      ? retreat?.has_payment === false
+        ? 0
+        : Number(batchResolution.activeBatch.price)
+      : retreat?.price || 0;
     return {
       rawTotalCount: activeRegistrationsCount,
-      basePrice: retreat?.price || 0,
+      basePrice: activeBatchBase,
       maxParticipants: retreat?.max_participants || 100,
       totalBeds,
       rooms: retreatRooms,
@@ -1076,6 +1156,8 @@ export default function ManageEventDetail() {
     };
   }, [
     activeRegistrationsCount,
+    batchResolution.activeBatch,
+    retreat?.has_payment,
     retreat?.price,
     retreat?.max_participants,
     totalBeds,
@@ -1228,13 +1310,32 @@ export default function ManageEventDetail() {
               </span>
             </div>
 
-            {retreat.registration_deadline && (
-              <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
-                <Clock className="w-3.5 h-3.5 shrink-0" />
+            {batchResolution.hasBatches ? (
+              <div className="flex items-center gap-1.5 text-primary font-medium">
+                <Layers className="w-3.5 h-3.5 shrink-0" />
                 <span>
-                  Inscrições até: {formatDateBR(retreat.registration_deadline)}
+                  {batchResolution.activeBatch
+                    ? `Lote vigente: ${batchResolution.activeBatch.name} (${
+                        retreat.has_payment === false
+                          ? "Gratuito"
+                          : formatBatchPriceLabel(Number(batchResolution.activeBatch.price))
+                      }) até ${formatBatchDateTime(batchResolution.activeBatch.end_at)}`
+                    : batchResolution.nextBatch
+                    ? `Próximo lote: ${batchResolution.nextBatch.name} em ${formatBatchDateTime(
+                        batchResolution.nextBatch.start_at
+                      )}`
+                    : "Lotes configurados: nenhum lote aberto"}
                 </span>
               </div>
+            ) : (
+              retreat.registration_deadline && (
+                <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
+                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Inscrições até: {formatDateBR(retreat.registration_deadline)}
+                  </span>
+                </div>
+              )
             )}
 
             <div className="flex items-center gap-1.5">
@@ -1334,6 +1435,18 @@ export default function ManageEventDetail() {
         >
           <Users className="w-4 h-4" />
           <span>Inscrições ({registrations.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("batches")}
+          className={`min-h-[44px] px-4 py-2.5 text-xs font-bold transition-all border-b-2 whitespace-nowrap cursor-pointer flex items-center gap-2 ${
+            activeTab === "batches"
+              ? "border-primary text-primary"
+              : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-50"
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>Lotes {retreatBatches.length > 0 ? `(${retreatBatches.length})` : ""}</span>
         </button>
 
         <button
@@ -1470,6 +1583,16 @@ export default function ManageEventDetail() {
             onFilteredDataChange={setTableFilteredRegistrations}
           />
         </div>
+      )}
+
+      {/* Tab: Lotes de Inscrição */}
+      {activeTab === "batches" && retreat && (
+        <RetreatBatchesTab
+          retreat={retreat}
+          batches={retreatBatches}
+          batchCounts={batchCounts}
+          onBatchesUpdated={(updated) => setRetreatBatches(updated)}
+        />
       )}
 
       {/* Tab 2: Divisão de Quartos */}
@@ -1638,6 +1761,14 @@ export default function ManageEventDetail() {
           retreat={retreat}
           eventId={eventId!}
           formId={retreat.form_id}
+          effectiveBasePrice={
+            batchResolution.activeBatch
+              ? retreat.has_payment === false
+                ? 0
+                : Number(batchResolution.activeBatch.price)
+              : retreat.price
+          }
+          activeBatchName={batchResolution.activeBatch?.name || null}
         />
       )}
 
@@ -1815,7 +1946,10 @@ export default function ManageEventDetail() {
         retreat={retreat}
         forms={forms}
         onSuccess={() => {
-          if (eventId) fetchRetreatDetails(eventId);
+          if (eventId) {
+            fetchRetreatDetails(eventId);
+            fetchRetreatBatches(eventId);
+          }
         }}
       />
 

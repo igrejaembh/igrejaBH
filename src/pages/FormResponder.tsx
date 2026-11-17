@@ -11,6 +11,8 @@ import {
   QrCode,
   Lock,
   Ticket,
+  Clock,
+  Layers,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -19,6 +21,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Badge } from "@/components/ui/badge"
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import { toast } from "sonner"
 import supabase from "@/lib/supabase"
 import {
@@ -35,7 +39,35 @@ import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { Layout } from "@/components/layout/Layout"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { parseEndOfDay } from "@/lib/utils"
+import {
+  buildBatchCountsMapFromRpcRows,
+  formatBatchDateTime,
+  formatBatchPriceLabel,
+  formatBatchWindow,
+  formatCountdownToBatchOpen,
+  resolveActiveBatch,
+  type BatchResolutionResult,
+  type RetreatBatch,
+} from "@/lib/retreatBatches"
+import { BATCH_STATUS_CONFIG } from "@/constants/colors"
 import type { User } from "@supabase/supabase-js"
+import type { Database, Json } from "@/lib/database.types"
+
+type AssociatedRetreatInfo = Pick<
+  Database["public"]["Tables"]["retreats"]["Row"],
+  | "id"
+  | "title"
+  | "status"
+  | "start_date"
+  | "end_date"
+  | "max_participants"
+  | "registration_deadline"
+  | "price"
+  | "has_payment"
+  | "location_text"
+  | "description"
+  | "image_url"
+>
 
 export default function FormResponder() {
   const navigate = useNavigate()
@@ -51,8 +83,9 @@ export default function FormResponder() {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [associatedEventTitle, setAssociatedEventTitle] = useState<string | null>(null)
-  const [closedReason, setClosedReason] = useState<"draft" | "expired" | "full" | "ended" | "manual" | null>(null)
-  const [associatedRetreat, setAssociatedRetreat] = useState<any | null>(null)
+  const [closedReason, setClosedReason] = useState<"draft" | "expired" | "full" | "ended" | "manual" | "batch_closed" | null>(null)
+  const [associatedRetreat, setAssociatedRetreat] = useState<AssociatedRetreatInfo | null>(null)
+  const [batchResolution, setBatchResolution] = useState<BatchResolutionResult<RetreatBatch> | null>(null)
   const [profileId, setProfileId] = useState<string | null>(null)
 
   // Presentation page & coupon states
@@ -233,6 +266,95 @@ export default function FormResponder() {
 
           if (retreatError) throw retreatError
 
+          const evaluateRetreatAvailability = async (
+            retreat: AssociatedRetreatInfo,
+            isFormActive: boolean
+          ) => {
+            setAssociatedRetreat(retreat)
+            setAssociatedEventTitle(retreat.title)
+
+            if (retreat.status === "rascunho") {
+              setBatchResolution(null)
+              setClosedReason("draft")
+              return
+            }
+            if (retreat.status === "encerrado") {
+              setBatchResolution(null)
+              setClosedReason("ended")
+              return
+            }
+
+            // Check registration batches first
+            const [{ data: batchesData }, { data: batchCountRows }] = await Promise.all([
+              supabase
+                .from("retreat_batches")
+                .select("*")
+                .eq("retreat_id", retreat.id)
+                .order("sort_order", { ascending: true })
+                .order("start_at", { ascending: true }),
+              supabase.rpc("get_retreat_batch_counts", {
+                p_retreat_ids: [retreat.id],
+              }),
+            ])
+
+            const countsMap = buildBatchCountsMapFromRpcRows(batchCountRows || [])
+            const resolution = resolveActiveBatch(
+              (batchesData as RetreatBatch[]) || [],
+              countsMap,
+              new Date()
+            )
+            setBatchResolution(resolution)
+
+            if (resolution.hasBatches) {
+              if (!resolution.activeBatch) {
+                setClosedReason("batch_closed")
+                return
+              }
+            } else {
+              // Preserve single registration_deadline / end_date check when 0 batches are configured
+              const now = new Date()
+              if (retreat.registration_deadline) {
+                const limitDate = parseEndOfDay(retreat.registration_deadline)
+                if (now > limitDate) {
+                  setClosedReason("expired")
+                  return
+                }
+              } else if (retreat.end_date) {
+                const limitDate = parseEndOfDay(retreat.end_date)
+                if (now > limitDate) {
+                  setClosedReason("expired")
+                  return
+                }
+              }
+            }
+
+            // Check capacity (counting only active registrations: 'confirmado' and 'presente')
+            const { count, error: countError } = await supabase
+              .from("registrations")
+              .select("id", { count: "exact", head: true })
+              .eq("retreat_id", retreat.id)
+              .in("status", ["confirmado", "presente"])
+
+            if (!countError && count !== null && retreat.max_participants) {
+              const searchParams = new URLSearchParams(window.location.search)
+              const hasBypass =
+                searchParams.get("waitlist_id") ||
+                searchParams.get("cupom") ||
+                searchParams.get("coupon") ||
+                searchParams.get("convite")
+              if (count >= retreat.max_participants && !hasBypass) {
+                setClosedReason("full")
+                return
+              }
+            }
+
+            if (!isFormActive) {
+              setClosedReason("manual")
+            } else {
+              setClosedReason(null)
+            }
+          }
+
           if (associatedRetreats && associatedRetreats.length > 0) {
             // Check if URL specifies a particular retreat
             const urlParams = new URLSearchParams(window.location.search)
@@ -249,57 +371,7 @@ export default function FormResponder() {
                         associatedRetreats[0]
             }
 
-            setAssociatedRetreat(retreat)
-            setAssociatedEventTitle(retreat.title)
-
-            if (retreat.status === "rascunho") {
-              setClosedReason("draft")
-            } else if (retreat.status === "encerrado") {
-              setClosedReason("ended")
-            } else {
-              // Check date expiration
-              const now = new Date()
-              if (retreat.registration_deadline) {
-                const limitDate = parseEndOfDay(retreat.registration_deadline)
-                if (now > limitDate) {
-                  setClosedReason("expired")
-                  return
-                }
-              } else if (retreat.end_date) {
-                const limitDate = parseEndOfDay(retreat.end_date)
-                if (now > limitDate) {
-                  setClosedReason("expired")
-                  return
-                }
-              }
-
-              // Check capacity (counting only active registrations: 'confirmado' and 'presente')
-              const { count, error: countError } = await supabase
-                .from("registrations")
-                .select("id", { count: "exact", head: true })
-                .eq("retreat_id", retreat.id)
-                .in("status", ["confirmado", "presente"])
-
-              if (!countError && count !== null && retreat.max_participants) {
-                const searchParams = new URLSearchParams(window.location.search)
-                const hasBypass =
-                  searchParams.get("waitlist_id") ||
-                  searchParams.get("cupom") ||
-                  searchParams.get("coupon") ||
-                  searchParams.get("convite")
-                if (count >= retreat.max_participants && !hasBypass) {
-                  setClosedReason("full")
-                  return
-                }
-              }
-
-              // If event is active, check form's manual switch
-              if (!dbForm.is_active) {
-                setClosedReason("manual")
-              } else {
-                setClosedReason(null)
-              }
-            }
+            await evaluateRetreatAvailability(retreat, dbForm.is_active ?? true)
           } else {
             // Fallback: check if URL specified retreat_id or eventId directly
             const urlParams = new URLSearchParams(window.location.search)
@@ -311,20 +383,26 @@ export default function FormResponder() {
                 .eq("id", directRetreatId)
                 .maybeSingle()
               if (directRetreat) {
-                setAssociatedRetreat(directRetreat)
-                setAssociatedEventTitle(directRetreat.title)
+                await evaluateRetreatAvailability(directRetreat, dbForm.is_active ?? true)
               } else {
                 setAssociatedRetreat(null)
                 setAssociatedEventTitle(null)
+                setBatchResolution(null)
+                if (!dbForm.is_active) {
+                  setClosedReason("manual")
+                } else {
+                  setClosedReason(null)
+                }
               }
             } else {
               setAssociatedRetreat(null)
               setAssociatedEventTitle(null)
-            }
-            if (!dbForm.is_active) {
-              setClosedReason("manual")
-            } else {
-              setClosedReason(null)
+              setBatchResolution(null)
+              if (!dbForm.is_active) {
+                setClosedReason("manual")
+              } else {
+                setClosedReason(null)
+              }
             }
           }
         } else {
@@ -357,14 +435,16 @@ export default function FormResponder() {
   }, [])
 
   // Validate coupon when code is present
+  const formTemplateId = formTemplate?.id
+  const associatedRetreatId = associatedRetreat?.id
   useEffect(() => {
-    if (!couponCode || !formTemplate) return
+    if (!couponCode || !formTemplateId) return
     async function checkCoupon() {
       try {
         const { data, error } = await supabase.rpc("validate_coupon", {
           p_code: couponCode!,
-          p_form_id: formTemplate!.id,
-          p_retreat_id: associatedRetreat?.id || undefined,
+          p_form_id: formTemplateId!,
+          p_retreat_id: associatedRetreatId || undefined,
         })
         if (!error && data) {
           const res = data as {
@@ -422,7 +502,7 @@ export default function FormResponder() {
       }
     }
     checkCoupon()
-  }, [couponCode, formTemplate?.id, associatedRetreat?.id])
+  }, [couponCode, formTemplateId, associatedRetreatId])
 
   // Handle standard input updates
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -708,6 +788,63 @@ export default function FormResponder() {
       }
     }
 
+    // Resolve active batch state right before submission to prevent stale prices or closed windows
+    let freshActiveBatch: RetreatBatch | null = null
+    if (associatedRetreat) {
+      try {
+        const [{ data: freshBatches, error: freshBatchErr }, { data: freshCountRows }] =
+          await Promise.all([
+            supabase
+              .from("retreat_batches")
+              .select("*")
+              .eq("retreat_id", associatedRetreat.id)
+              .order("sort_order", { ascending: true })
+              .order("start_at", { ascending: true }),
+            supabase.rpc("get_retreat_batch_counts", {
+              p_retreat_ids: [associatedRetreat.id],
+            }),
+          ])
+
+        if (freshBatchErr) throw freshBatchErr
+
+        const freshCounts = buildBatchCountsMapFromRpcRows(freshCountRows || [])
+        const freshRes = resolveActiveBatch(
+          (freshBatches as RetreatBatch[]) || [],
+          freshCounts,
+          new Date()
+        )
+        setBatchResolution(freshRes)
+
+        if (freshRes.hasBatches) {
+          if (!freshRes.activeBatch) {
+            setClosedReason("batch_closed")
+            const errMsg = freshRes.nextBatch
+              ? `As inscrições para o próximo lote (${freshRes.nextBatch.name}) abrem em ${formatBatchDateTime(freshRes.nextBatch.start_at)}.`
+              : "Nenhum lote de inscrição está aberto no momento."
+            toast.error(errMsg)
+            return
+          }
+          freshActiveBatch = freshRes.activeBatch
+        }
+      } catch (batchErr: unknown) {
+        const msg =
+          batchErr instanceof Error ? batchErr.message : "Erro ao verificar lote vigente."
+        toast.error(msg)
+        return
+      }
+    }
+
+    const hasPayment = associatedRetreat
+      ? associatedRetreat.has_payment !== false
+      : false
+    const effectiveBasePrice = associatedRetreat
+      ? !hasPayment
+        ? 0
+        : freshActiveBatch
+        ? Number(freshActiveBatch.price)
+        : Number(associatedRetreat.price) || 0
+      : 0
+
     // Save submission to Supabase
     async function executeSubmission(
       paid: boolean,
@@ -739,20 +876,24 @@ export default function FormResponder() {
               .in("status", ["confirmado", "presente"])
 
             if (existingRegs) {
-              const isDuplicate = existingRegs.some((reg: any) => {
+              const isDuplicate = existingRegs.some((reg) => {
+                const regProfiles = reg.profiles as { email?: string | null; cpf?: string | null } | null
+                const regGuest = reg.guest_data as { email?: string | null; cpf?: string | null } | null
+                const regCustom = reg.custom_responses as Record<string, unknown> | null
+
                 // Check profiles email/cpf
-                if (reg.profiles) {
-                  if (emailVal && reg.profiles.email?.toLowerCase() === emailVal) return true
-                  if (cpfVal && reg.profiles.cpf?.replace(/\D/g, "") === cpfVal) return true
+                if (regProfiles) {
+                  if (emailVal && regProfiles.email?.toLowerCase() === emailVal) return true
+                  if (cpfVal && regProfiles.cpf?.replace(/\D/g, "") === cpfVal) return true
                 }
                 // Check guest_data email/cpf
-                if (reg.guest_data) {
-                  if (emailVal && reg.guest_data.email?.toLowerCase() === emailVal) return true
-                  if (cpfVal && reg.guest_data.cpf?.replace(/\D/g, "") === cpfVal) return true
+                if (regGuest) {
+                  if (emailVal && regGuest.email?.toLowerCase() === emailVal) return true
+                  if (cpfVal && regGuest.cpf?.replace(/\D/g, "") === cpfVal) return true
                 }
                 // Check custom_responses keys/values
-                if (reg.custom_responses) {
-                  for (const [key, val] of Object.entries(reg.custom_responses)) {
+                if (regCustom) {
+                  for (const [key, val] of Object.entries(regCustom)) {
                     const label = key.toLowerCase()
                     if (label.includes("email") || label.includes("e-mail")) {
                       if (emailVal && typeof val === "string" && val.toLowerCase() === emailVal) return true
@@ -779,9 +920,9 @@ export default function FormResponder() {
               .eq("form_id", template.id)
 
             if (existingSubmissions) {
-              const isDuplicate = existingSubmissions.some((sub: any) => {
-                if (sub.data) {
-                  for (const [key, val] of Object.entries(sub.data)) {
+              const isDuplicate = existingSubmissions.some((sub) => {
+                if (sub.data && typeof sub.data === "object" && !Array.isArray(sub.data)) {
+                  for (const [key, val] of Object.entries(sub.data as Record<string, unknown>)) {
                     const field = template.fields.find(f => f.id === key)
                     if (field) {
                       const label = field.label.toLowerCase()
@@ -809,7 +950,7 @@ export default function FormResponder() {
         const { error } = await supabase.from("form_submissions").insert({
           id: submissionId,
           form_id: template.id,
-          data: filteredData,
+          data: filteredData as Json,
           user_id: user?.id || null,
         })
 
@@ -818,33 +959,33 @@ export default function FormResponder() {
         // If this form is associated with a retreat, create a registration as well!
         if (associatedRetreat) {
           // Map custom responses field IDs to their labels for easy display in registrations
-          const mappedResponses: Record<string, any> = {}
+          const mappedResponses: Record<string, Json> = {}
           template.fields.forEach((field) => {
             if (
               isFieldVisible(field, formData, template.fields) &&
               formData[field.id] !== undefined
             ) {
-              mappedResponses[field.label] = formData[field.id]
+              mappedResponses[field.label] = formData[field.id] as Json
             }
           })
 
           // Extract basic participant details from form fields to build guest_data
-          const guestData: Record<string, any> = {}
+          const guestData: Record<string, Json> = {}
           template.fields.forEach((field) => {
             const val = formData[field.id]
             if (val !== undefined && val !== null) {
               const label = field.label.toLowerCase()
               const fid = field.id.toLowerCase()
               if (label.includes("nome") || fid.includes("name")) {
-                guestData.full_name = val
+                guestData.full_name = val as Json
               } else if (label.includes("email") || label.includes("e-mail") || fid.includes("email")) {
-                guestData.email = val
+                guestData.email = val as Json
               } else if (label.includes("telefone") || label.includes("celular") || label.includes("fone") || label.includes("whatsapp") || fid.includes("phone")) {
-                guestData.phone = val
+                guestData.phone = val as Json
               } else if (label.includes("sexo") || label.includes("gênero") || label.includes("genero") || fid.includes("gender") || fid.includes("sexo")) {
-                guestData.gender = val
+                guestData.gender = val as Json
               } else if (label.includes("cpf") || fid.includes("cpf")) {
-                guestData.cpf = val
+                guestData.cpf = val as Json
               }
             }
           })
@@ -872,6 +1013,8 @@ export default function FormResponder() {
             service_team: teamToStamp,
             form_submission_id: submissionId,
             status: "confirmado",
+            batch_id: freshActiveBatch ? freshActiveBatch.id : null,
+            batch_price_snapshot: freshActiveBatch ? effectiveBasePrice : null,
           })
 
           if (regError) throw regError
@@ -894,20 +1037,19 @@ export default function FormResponder() {
         toast.dismiss(submitToastId)
         setSubmitted(true)
         toast.success("Resposta enviada com sucesso!")
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("Error saving form response to Supabase:", e)
-        toast.error(
-          `Ocorreu um erro ao enviar suas respostas: ${e.message || "Erro desconhecido"}`
-        )
+        const msg = e instanceof Error ? e.message : "Erro desconhecido"
+        toast.error(`Ocorreu um erro ao enviar suas respostas: ${msg}`)
       }
     }
 
     const isFreeEvent = associatedRetreat
-      ? (associatedRetreat.has_payment === false || Number(associatedRetreat.price) === 0)
+      ? !hasPayment || (!freshActiveBatch && Number(associatedRetreat.price) === 0)
       : true
-    const total = isFreeEvent
+    const total = !hasPayment
       ? 0
-      : calculateTotalPrice(Number(associatedRetreat?.price) || 0, template.fields, filteredData)
+      : calculateTotalPrice(effectiveBasePrice, template.fields, filteredData)
 
     // BRANCH 1: Beneficiary with coupon code
     if (couponCode) {
@@ -1024,15 +1166,16 @@ export default function FormResponder() {
         setCheckoutPrice(discountedTotal)
         setShowCheckout(true)
         return
-      } catch (err: any) {
+      } catch (err: unknown) {
         toast.dismiss(redeemToastId)
-        toast.error("Falha ao processar código: " + err.message)
+        const msg = err instanceof Error ? err.message : "Erro desconhecido"
+        toast.error("Falha ao processar código: " + msg)
         return
       }
     }
 
     // BRANCH 2: Event requiring payment
-    if (associatedRetreat && !isFreeEvent && total > 0) {
+    if (associatedRetreat && hasPayment && total > 0) {
       setPendingSubmission({
         execute: async (p: boolean, m: string, r: string) => {
           await executeSubmission(p, m, r)
@@ -1059,8 +1202,9 @@ export default function FormResponder() {
         setShowCheckout(false)
         setProcessingPayment(false)
         setPendingSubmission(null)
-      } catch (err: any) {
-        toast.error("Erro ao processar pagamento: " + err.message)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Erro desconhecido"
+        toast.error("Erro ao processar pagamento: " + msg)
         setProcessingPayment(false)
       }
     }, 2500)
@@ -1134,6 +1278,113 @@ export default function FormResponder() {
             }}
             onCancel={() => navigate(-1)}
           />
+        </div>
+      )
+    }
+
+    if (closedReason === "batch_closed" && associatedRetreat && batchResolution) {
+      const nextB = batchResolution.nextBatch
+      const isUpcoming = batchResolution.status === "upcoming" || batchResolution.status === "between"
+      const isAllFull = batchResolution.status === "all_full"
+      const hasPaymentFlag = associatedRetreat.has_payment !== false
+
+      const statusTitle = nextB
+        ? batchResolution.status === "upcoming"
+          ? "Inscrições Ainda Não Abertas"
+          : "Aguardando Próximo Lote"
+        : isAllFull
+        ? "Vagas dos Lotes Esgotadas"
+        : "Lotes de Inscrição Encerrados"
+
+      const alertConfig = nextB
+        ? BATCH_STATUS_CONFIG.upcoming
+        : isAllFull
+        ? BATCH_STATUS_CONFIG.full
+        : BATCH_STATUS_CONFIG.ended
+
+      return (
+        <div className="mx-auto max-w-xl animate-in flex flex-col gap-6 px-4 py-12 duration-500 fade-in slide-in-from-bottom-4">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <div className="flex size-16 items-center justify-center rounded-full bg-muted text-foreground">
+              <Clock className="size-8" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                {statusTitle}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {associatedEventTitle}
+              </p>
+            </div>
+          </div>
+
+          <Alert className={alertConfig.alertClass}>
+            <Clock />
+            <AlertTitle>
+              {nextB
+                ? `Próximo lote: ${nextB.name} (${hasPaymentFlag ? formatBatchPriceLabel(Number(nextB.price)) : "Gratuito"})`
+                : isAllFull
+                ? "Vagas preenchidas"
+                : "Prazo encerrado"}
+            </AlertTitle>
+            <AlertDescription className="text-current/90">
+              {nextB
+                ? `As inscrições para este lote abrem em ${formatBatchDateTime(nextB.start_at)} (${formatCountdownToBatchOpen(nextB.start_at)}).`
+                : isAllFull
+                ? "Todas as vagas disponibilizadas para os lotes deste encontro foram preenchidas."
+                : "Todos os lotes configurados para este encontro já encerraram."}
+            </AlertDescription>
+          </Alert>
+
+          {batchResolution.batches.length > 0 && (
+            <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                <Layers className="size-3.5 text-primary" />
+                <span>Cronograma de Lotes</span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {batchResolution.batches.map((item) => {
+                  const cfg = BATCH_STATUS_CONFIG[item.state === "full" ? "full" : item.state]
+                  return (
+                    <div
+                      key={item.batch.id}
+                      className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-foreground">
+                            {item.batch.name}
+                          </span>
+                          <Badge variant="outline" className={cfg.badgeClass}>
+                            {cfg.label}
+                          </Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatBatchWindow(item.batch.start_at, item.batch.end_at)}
+                        </span>
+                      </div>
+                      <span className="text-sm font-extrabold text-foreground shrink-0">
+                        {hasPaymentFlag
+                          ? formatBatchPriceLabel(Number(item.batch.price))
+                          : "Gratuito"}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-center">
+            <Button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="min-h-[44px] cursor-pointer"
+            >
+              <ArrowLeft data-icon="inline-start" />
+              {isUpcoming ? "Voltar para a página anterior" : "Voltar"}
+            </Button>
+          </div>
         </div>
       )
     }
@@ -1291,6 +1542,25 @@ export default function FormResponder() {
               </p>
             )}
           </div>
+
+          {batchResolution?.activeBatch && associatedRetreat && (
+            <Alert className={BATCH_STATUS_CONFIG.active.alertClass}>
+              <Layers />
+              <AlertTitle>
+                Lote vigente: {batchResolution.activeBatch.name} —{" "}
+                {associatedRetreat.has_payment === false
+                  ? "Gratuito"
+                  : formatBatchPriceLabel(Number(batchResolution.activeBatch.price))}
+              </AlertTitle>
+              <AlertDescription className="text-current/90">
+                Válido até {formatBatchDateTime(batchResolution.activeBatch.end_at)}
+                {batchResolution.activeBatchInfo?.remainingSpots !== null &&
+                batchResolution.activeBatchInfo?.remainingSpots !== undefined
+                  ? ` • ${batchResolution.activeBatchInfo.remainingSpots} vaga(s) restante(s) neste lote.`
+                  : "."}
+              </AlertDescription>
+            </Alert>
+          )}
 
           {couponCode && (
             couponValidation.checked && !couponValidation.valid ? (
@@ -1560,7 +1830,10 @@ export default function FormResponder() {
             <div className="flex items-center justify-between border-b border-border pb-4">
               <div>
                 <h3 className="text-lg font-bold text-foreground">Pagamento Seguro</h3>
-                <p className="text-xs text-muted-foreground">Inscrição para {associatedRetreat?.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  Inscrição para {associatedRetreat?.title}
+                  {batchResolution?.activeBatch ? ` • ${batchResolution.activeBatch.name}` : ""}
+                </p>
               </div>
               <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 px-2 py-1 rounded-full dark:bg-emerald-500/5">
                 <Lock className="h-3 w-3" />
@@ -1781,6 +2054,7 @@ export default function FormResponder() {
       <FormPresentationView
         presentation={formTemplate.presentationPage}
         retreat={associatedRetreat}
+        activeBatch={batchResolution?.activeBatch ?? null}
         onStart={() => setShowPresentation(false)}
       />
     </div>

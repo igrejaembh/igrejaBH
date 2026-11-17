@@ -16,6 +16,7 @@ import {
   QrCode,
   AlertTriangle,
   XCircle,
+  Layers,
 } from "lucide-react"
 import {
   Card,
@@ -29,6 +30,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import {
   Dialog,
   DialogContent,
@@ -52,15 +54,32 @@ import {
   calculateTotalPrice,
 } from "@/lib/forms"
 import type { FormField } from "@/lib/forms"
-import type { Database } from "@/lib/database.types"
+import type { Database, Json } from "@/lib/database.types"
 import { formatDateBR } from "@/lib/utils"
 import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { EventWaitlistDialog } from "@/components/events/EventWaitlistDialog"
+import {
+  buildBatchCountsMapFromRpcRows,
+  formatBatchDateTime,
+  formatBatchPriceLabel,
+  formatCountdownToBatchOpen,
+  formatCurrencyBRL,
+  resolveActiveBatch,
+  type RetreatBatch,
+} from "@/lib/retreatBatches"
+import { BATCH_STATUS_CONFIG } from "@/constants/colors"
 
-type Retreat = Database["public"]["Tables"]["retreats"]["Row"]
+type Retreat = Database["public"]["Tables"]["retreats"]["Row"] & {
+  retreat_batches?: RetreatBatch[] | null
+}
 
 type Registration = Database["public"]["Tables"]["registrations"]["Row"] & {
   retreats: Retreat | null
+  retreat_batches?: {
+    id: string
+    name: string
+    price: number
+  } | null
 }
 
 interface Profile {
@@ -77,6 +96,7 @@ export default function Events() {
   const [myRegistrations, setMyRegistrations] = useState<Registration[]>([])
   const [userProfile, setUserProfile] = useState<Profile | null>(null)
   const [registrationCounts, setRegistrationCounts] = useState<Record<string, number>>({})
+  const [batchCounts, setBatchCounts] = useState<Record<string, number>>({})
   const [userWaitlistRetreatIds, setUserWaitlistRetreatIds] = useState<string[]>([])
   const [waitlistDialogRetreat, setWaitlistDialogRetreat] = useState<Retreat | null>(null)
 
@@ -103,9 +123,9 @@ export default function Events() {
   const [guestErrors, setGuestErrors] = useState<Record<string, string>>({})
 
   // Step 2 Form Data (Dynamic Form Responses)
-  const [customResponses, setCustomResponses] = useState<Record<string, any>>(
-    {}
-  )
+  const [customResponses, setCustomResponses] = useState<
+    Record<string, string | number | string[]>
+  >({})
   const [customFormFields, setCustomFormFields] = useState<FormField[]>([])
   const [loadingForm, setLoadingForm] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
@@ -200,22 +220,33 @@ export default function Events() {
         })
       }
 
-      // 2. Fetch active retreats
+      // 2. Fetch active retreats with batches
       const { data: eventsData, error: eventsErr } = await supabase
         .from("retreats")
-        .select("*")
+        .select(`
+          *,
+          retreat_batches (
+            *
+          )
+        `)
         .eq("status", "ativo")
         .order("start_date", { ascending: true })
       if (eventsErr) throw eventsErr
-      setRetreats(eventsData || [])
+      const retreatsList = (eventsData as unknown as Retreat[]) || []
+      setRetreats(retreatsList)
 
-      // 2.1 Fetch registration counts to verify capacity
-      const activeIds = (eventsData || []).map((r) => r.id)
+      // 2.1 Fetch registration counts and per-batch counts to verify capacity
+      const activeIds = retreatsList.map((r) => r.id)
       if (activeIds.length > 0) {
-        const { data: countList } = await supabase
-          .from("registrations")
-          .select("retreat_id")
-          .in("retreat_id", activeIds)
+        const [{ data: countList }, { data: batchCountRows }] = await Promise.all([
+          supabase
+            .from("registrations")
+            .select("retreat_id")
+            .in("retreat_id", activeIds),
+          supabase.rpc("get_retreat_batch_counts", {
+            p_retreat_ids: activeIds,
+          }),
+        ])
 
         const countsMap: Record<string, number> = {}
         countList?.forEach((row) => {
@@ -224,6 +255,7 @@ export default function Events() {
           }
         })
         setRegistrationCounts(countsMap)
+        setBatchCounts(buildBatchCountsMapFromRpcRows(batchCountRows || []))
 
         // 2.2 Check user's own waitlist entries
         if (profile?.email) {
@@ -252,12 +284,17 @@ export default function Events() {
             *,
             retreats (
               *
+            ),
+            retreat_batches:retreat_batches!registrations_batch_id_fkey (
+              id,
+              name,
+              price
             )
           `
           )
           .eq("profile_id", profile.id)
         if (regsErr) throw regsErr
-        setMyRegistrations(regsData || [])
+        setMyRegistrations((regsData as unknown as Registration[]) || [])
       }
     } catch (err: unknown) {
       const error = err as Error
@@ -282,7 +319,7 @@ export default function Events() {
         setCustomFormFields(fields)
 
         // Initialize responses structure
-        const initialResponses: Record<string, any> = {}
+        const initialResponses: Record<string, string | number | string[]> = {}
         fields.forEach((f) => {
           initialResponses[f.id] = f.type === "checkbox" ? [] : ""
         })
@@ -371,7 +408,7 @@ export default function Events() {
       // Required check
       if (field.required) {
         if (field.type === "checkbox") {
-          if (!val || val.length === 0) {
+          if (!Array.isArray(val) || val.length === 0) {
             errors[field.id] = `${field.label} é obrigatório.`
           }
         } else if (typeof val === "string" && !val.trim()) {
@@ -445,10 +482,65 @@ export default function Events() {
     if (!registeringRetreat || !userProfile) return
     setSubmitting(true)
 
-    const basePrice = registeringRetreat.has_payment === false ? 0 : (registeringRetreat.price || 0)
+    let activeBatchId: string | null = null
+    let basePrice =
+      registeringRetreat.has_payment === false ? 0 : (registeringRetreat.price || 0)
+
+    try {
+      const [{ data: freshBatches, error: freshBatchErr }, { data: freshCountRows }] =
+        await Promise.all([
+          supabase
+            .from("retreat_batches")
+            .select("*")
+            .eq("retreat_id", registeringRetreat.id)
+            .order("sort_order", { ascending: true })
+            .order("start_at", { ascending: true }),
+          supabase.rpc("get_retreat_batch_counts", {
+            p_retreat_ids: [registeringRetreat.id],
+          }),
+        ])
+
+      if (freshBatchErr) throw freshBatchErr
+
+      const freshCounts = buildBatchCountsMapFromRpcRows(freshCountRows || [])
+      const freshResolution = resolveActiveBatch(
+        freshBatches || [],
+        freshCounts,
+        new Date()
+      )
+
+      if (freshResolution.hasBatches) {
+        if (!freshResolution.activeBatch) {
+          const msg = freshResolution.nextBatch
+            ? `Nenhum lote está aberto agora. O ${freshResolution.nextBatch.name} abre em ${formatBatchDateTime(freshResolution.nextBatch.start_at)}.`
+            : "O lote de inscrição foi encerrado ou atingiu o limite de vagas."
+          toast.error(msg)
+          setSubmitting(false)
+          fetchInitialData()
+          return
+        }
+        activeBatchId = freshResolution.activeBatch.id
+        basePrice =
+          registeringRetreat.has_payment === false
+            ? 0
+            : Number(freshResolution.activeBatch.price)
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro ao validar lote ativo."
+      toast.error(msg)
+      setSubmitting(false)
+      return
+    }
+
     const finalPrice = calculateTotalPrice(basePrice, customFormFields, customResponses)
 
-    const performSubmission = async (paid: boolean, method: string, ref: string) => {
+    const performSubmission = async (
+      paid: boolean,
+      method: string,
+      ref: string,
+      batchId: string | null,
+      batchPriceSnapshot: number | null
+    ) => {
       try {
         let formSubmissionId: string | null = null
 
@@ -458,13 +550,13 @@ export default function Events() {
 
           formSubmissionId = `sub-${Math.random().toString(36).substring(7)}`
 
-          const filteredData: Record<string, any> = {}
+          const filteredData: Record<string, Json> = {}
           customFormFields.forEach((field) => {
             if (
               isFieldVisible(field, customResponses, customFormFields) &&
               customResponses[field.id] !== undefined
             ) {
-              filteredData[field.id] = customResponses[field.id]
+              filteredData[field.id] = customResponses[field.id] as Json
             }
           })
 
@@ -479,10 +571,10 @@ export default function Events() {
         }
 
         // Map custom responses field IDs to their labels for easy display
-        const mappedResponses: Record<string, any> = {}
+        const mappedResponses: Record<string, Json> = {}
         customFormFields.forEach((field) => {
           if (isFieldVisible(field, customResponses, customFormFields)) {
-            mappedResponses[field.label] = customResponses[field.id]
+            mappedResponses[field.label] = customResponses[field.id] as Json
           }
         })
 
@@ -497,6 +589,8 @@ export default function Events() {
           paid: paid,
           form_submission_id: formSubmissionId,
           status: "confirmado" as const,
+          batch_id: batchId,
+          batch_price_snapshot: batchPriceSnapshot,
         }
 
         const { error } = await supabase.from("registrations").insert([payload])
@@ -521,15 +615,17 @@ export default function Events() {
       }
     }
 
+    const snapshotPrice = activeBatchId ? basePrice : null
+
     if (finalPrice > 0) {
       // Simulate integrated payment processing
       setTimeout(() => {
         const method = paymentType === "pix" ? "pix" : "credit_card"
         const ref = `Integrado - ${paymentType.toUpperCase()} - Simulado #${Math.floor(100000 + Math.random() * 900000)}`
-        performSubmission(true, method, ref)
+        performSubmission(true, method, ref, activeBatchId, snapshotPrice)
       }, 2500)
     } else {
-      performSubmission(true, "gratuito", "Isento")
+      performSubmission(true, "gratuito", "Isento", activeBatchId, snapshotPrice)
     }
   }
 
@@ -546,6 +642,52 @@ export default function Events() {
 
   // Active registration view (stepper or waitlist)
   if (registeringRetreat) {
+    const activeBatchResolution = resolveActiveBatch(
+      registeringRetreat.retreat_batches || [],
+      batchCounts,
+      new Date()
+    )
+
+    if (activeBatchResolution.hasBatches && !activeBatchResolution.activeBatch) {
+      const nextB = activeBatchResolution.nextBatch
+      return (
+        <div className="mx-auto max-w-2xl space-y-6 px-4 py-6 pb-24">
+          <div className="flex items-center justify-between border-b border-border/50 pb-4">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setRegisteringRetreat(null)}
+              className="min-h-[44px] -ml-2 gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft data-icon="inline-start" />
+              Voltar para Encontros
+            </Button>
+          </div>
+          <Alert
+            className={
+              nextB
+                ? BATCH_STATUS_CONFIG.upcoming.alertClass
+                : BATCH_STATUS_CONFIG.ended.alertClass
+            }
+          >
+            <Clock />
+            <AlertTitle>
+              {nextB
+                ? `Inscrições fechadas — Próximo lote: ${nextB.name}`
+                : activeBatchResolution.status === "all_full"
+                ? "Vagas dos lotes esgotadas"
+                : "Lotes de inscrição encerrados"}
+            </AlertTitle>
+            <AlertDescription className="text-current/90">
+              {nextB
+                ? `O ${nextB.name} (${registeringRetreat.has_payment === false ? "Gratuito" : formatBatchPriceLabel(nextB.price)}) abre em ${formatBatchDateTime(nextB.start_at)} (${formatCountdownToBatchOpen(nextB.start_at)}).`
+                : "No momento não há lotes abertos para novas inscrições neste encontro."}
+            </AlertDescription>
+          </Alert>
+        </div>
+      )
+    }
+
     const regCount = registrationCounts[registeringRetreat.id] || 0
     const isRetreatFull =
       !!registeringRetreat.max_participants &&
@@ -589,10 +731,17 @@ export default function Events() {
       )
     }
 
+    const resolvedBasePrice =
+      registeringRetreat.has_payment === false
+        ? 0
+        : activeBatchResolution.activeBatch
+        ? Number(activeBatchResolution.activeBatch.price)
+        : (registeringRetreat.price || 0)
+
     return (
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-24">
         {/* Stepper Header */}
-        <div className="flex items-center justify-between border-b border-border/50 pb-4">
+        <div className="flex items-center justify-between gap-3 border-b border-border/50 pb-4">
           <button
             onClick={() => {
               if (
@@ -603,7 +752,7 @@ export default function Events() {
                 setRegisteringRetreat(null)
               }
             }}
-            className="flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground"
+            className="flex min-h-[44px] cursor-pointer items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" /> Cancelar
           </button>
@@ -612,7 +761,9 @@ export default function Events() {
               {registeringRetreat.title}
             </h2>
             <p className="text-xs text-muted-foreground">
-              Inscrição no Encontro
+              {activeBatchResolution.activeBatch
+                ? `${activeBatchResolution.activeBatch.name} • ${formatBatchPriceLabel(resolvedBasePrice)}`
+                : "Inscrição no Encontro"}
             </p>
           </div>
         </div>
@@ -924,7 +1075,7 @@ export default function Events() {
 
                         {field.type === "select" && (
                           <Select
-                            value={customResponses[field.id] || "none"}
+                            value={String(customResponses[field.id] || "none")}
                             onValueChange={(val) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -948,7 +1099,7 @@ export default function Events() {
 
                         {field.type === "radio" && (
                           <RadioGroup
-                            value={customResponses[field.id] || ""}
+                            value={String(customResponses[field.id] || "")}
                             onValueChange={(val) =>
                               setCustomResponses((prev) => ({
                                 ...prev,
@@ -974,8 +1125,10 @@ export default function Events() {
                         {field.type === "checkbox" && (
                           <div className="mt-2 flex flex-col gap-2.5">
                             {field.options.map((opt) => {
-                              const checkedList =
-                                customResponses[field.id] || []
+                              const rawList = customResponses[field.id]
+                              const checkedList = Array.isArray(rawList)
+                                ? rawList
+                                : []
                               const isChecked = checkedList.includes(opt)
                               return (
                                 <div key={opt} className="flex items-center gap-2">
@@ -1016,8 +1169,7 @@ export default function Events() {
 
             {/* STEP 3: Payment & Notes */}
             {activeStep === 3 && (() => {
-              const basePrice = registeringRetreat?.has_payment === false ? 0 : (registeringRetreat?.price || 0)
-              const totalPrice = calculateTotalPrice(basePrice, customFormFields, customResponses)
+              const totalPrice = calculateTotalPrice(resolvedBasePrice, customFormFields, customResponses)
 
               return (
                 <div className="space-y-5 text-left">
@@ -1026,11 +1178,19 @@ export default function Events() {
                   </h3>
 
                   {/* Price Summary */}
-                  <div className="rounded-lg bg-muted/40 p-4 border border-border/30">
+                  <div className="rounded-lg bg-muted/40 p-4 border border-border/30 flex flex-col gap-1.5">
+                    {activeBatchResolution.activeBatch && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-muted-foreground">Lote aplicado:</span>
+                        <span className="font-semibold text-foreground">
+                          {activeBatchResolution.activeBatch.name} ({formatBatchPriceLabel(resolvedBasePrice)})
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-muted-foreground font-medium">Valor Total da Inscrição:</span>
                       <span className="text-xl font-extrabold text-foreground">
-                        {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(totalPrice)}
+                        {formatCurrencyBRL(totalPrice)}
                       </span>
                     </div>
                   </div>
@@ -1203,11 +1363,11 @@ export default function Events() {
             ) : (
               <Button
                 onClick={handleConfirmRegistration}
-                className="cursor-pointer rounded-lg bg-primary font-bold text-primary-foreground shadow-md shadow-primary/20"
+                className="cursor-pointer rounded-lg bg-primary font-bold text-primary-foreground shadow-md shadow-primary/20 min-h-[44px]"
                 disabled={
-                  submitting || 
-                  (calculateTotalPrice(registeringRetreat?.price || 0, customFormFields, customResponses) > 0 && 
-                   paymentType === "card" && 
+                  submitting ||
+                  (calculateTotalPrice(resolvedBasePrice, customFormFields, customResponses) > 0 &&
+                   paymentType === "card" &&
                    (!cardName || !cardNumber || !cardExpiry || !cardCvv))
                 }
               >
@@ -1303,6 +1463,17 @@ export default function Events() {
                         {retreat.end_date && formatDateBR(retreat.end_date)}
                       </span>
                     </div>
+                    {reg.retreat_batches && (
+                      <div className="flex justify-between border-b border-border/10 pb-1.5">
+                        <span>Lote da Inscrição:</span>
+                        <span className="font-bold text-foreground">
+                          {reg.retreat_batches.name}
+                          {reg.batch_price_snapshot !== null && reg.batch_price_snapshot !== undefined
+                            ? ` (${formatBatchPriceLabel(reg.batch_price_snapshot)})`
+                            : ""}
+                        </span>
+                      </div>
+                    )}
                     {!isCancelled && (
                       <div className="flex justify-between border-b border-border/10 pb-1.5">
                         <span>Alojamento Alocado:</span>
@@ -1407,6 +1578,19 @@ export default function Events() {
                 !!retreat.max_participants && regCount >= retreat.max_participants
               const isOnWaitlist = userWaitlistRetreatIds.includes(retreat.id)
 
+              const batchResolution = resolveActiveBatch(
+                retreat.retreat_batches || [],
+                batchCounts,
+                new Date()
+              )
+              const isBatchBlocked =
+                batchResolution.hasBatches && !batchResolution.activeBatch
+              const hasPayment =
+                retreat.has_payment !== false
+              const effectivePrice = batchResolution.activeBatch
+                ? (hasPayment ? Number(batchResolution.activeBatch.price) : 0)
+                : (hasPayment ? Number(retreat.price || 0) : 0)
+
               return (
                 <Card
                   key={retreat.id}
@@ -1429,9 +1613,19 @@ export default function Events() {
                     </div>
                   )}
                   <CardHeader className="p-5 pb-3">
-                    <CardTitle className="text-lg font-extrabold tracking-tight text-foreground">
-                      {retreat.title}
-                    </CardTitle>
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <CardTitle className="text-lg font-extrabold tracking-tight text-foreground">
+                        {retreat.title}
+                      </CardTitle>
+                      {batchResolution.hasBatches && batchResolution.activeBatch && (
+                        <Badge
+                          variant="outline"
+                          className={BATCH_STATUS_CONFIG.active.badgeClass}
+                        >
+                          {batchResolution.activeBatch.name}
+                        </Badge>
+                      )}
+                    </div>
                     <CardDescription className="mt-1 flex items-center gap-1.5 text-xs">
                       <MapPin className="h-3.5 w-3.5 text-muted-foreground" />{" "}
                       {retreat.location_text || "BH e região"}
@@ -1444,28 +1638,110 @@ export default function Events() {
                     </p>
 
                     <div className="space-y-2 border-t border-border/10 pt-3 text-xs">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="flex items-center gap-1 text-muted-foreground">
                           <Clock className="h-3.5 w-3.5" /> Período:
                         </span>
-                        <span className="font-bold text-foreground">
+                        <span className="font-bold text-foreground text-right">
                           {retreat.start_date && formatDateBR(retreat.start_date)}{" "}
                           até{" "}
                           {retreat.end_date && formatDateBR(retreat.end_date)}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <DollarSign className="h-3.5 w-3.5" /> Valor
-                          individual:
-                        </span>
-                        <span className="text-sm font-extrabold text-foreground">
-                          {retreat.price && retreat.price > 0
-                            ? `R$ ${Number(retreat.price).toFixed(2)}`
-                            : "Grátis"}
-                        </span>
-                      </div>
+
+                      {batchResolution.hasBatches ? (
+                        batchResolution.activeBatch ? (
+                          <>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-1 text-muted-foreground">
+                                <DollarSign className="h-3.5 w-3.5" />{" "}
+                                {batchResolution.activeBatch.name}:
+                              </span>
+                              <span className="text-sm font-extrabold text-foreground">
+                                {formatBatchPriceLabel(effectivePrice)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="flex items-center gap-1 text-muted-foreground">
+                                <Layers className="h-3.5 w-3.5" /> Lote vigente até:
+                              </span>
+                              <span className="font-semibold text-foreground text-right">
+                                {formatBatchDateTime(batchResolution.activeBatch.end_at)}
+                              </span>
+                            </div>
+                            {batchResolution.activeBatchInfo?.remainingSpots !== null &&
+                              batchResolution.activeBatchInfo?.remainingSpots !== undefined && (
+                                <div className="flex items-center justify-between gap-2 text-[11px]">
+                                  <span className="text-muted-foreground">
+                                    Vagas neste lote:
+                                  </span>
+                                  <span className="font-semibold text-foreground">
+                                    {batchResolution.activeBatchInfo.remainingSpots}{" "}
+                                    {batchResolution.activeBatchInfo.remainingSpots === 1
+                                      ? "restante"
+                                      : "restantes"}
+                                  </span>
+                                </div>
+                              )}
+                          </>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="flex items-center gap-1 text-muted-foreground">
+                              <Layers className="h-3.5 w-3.5" /> Situação dos lotes:
+                            </span>
+                            <span className="font-bold text-foreground">
+                              {batchResolution.nextBatch
+                                ? `Próximo: ${batchResolution.nextBatch.name}`
+                                : batchResolution.status === "all_full"
+                                ? "Vagas esgotadas"
+                                : "Encerrados"}
+                            </span>
+                          </div>
+                        )
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1 text-muted-foreground">
+                            <DollarSign className="h-3.5 w-3.5" /> Valor
+                            individual:
+                          </span>
+                          <span className="text-sm font-extrabold text-foreground">
+                            {effectivePrice > 0
+                              ? formatCurrencyBRL(effectivePrice)
+                              : "Grátis"}
+                          </span>
+                        </div>
+                      )}
                     </div>
+
+                    {!hasRegistered && isBatchBlocked && (
+                      <Alert
+                        className={
+                          batchResolution.nextBatch
+                            ? BATCH_STATUS_CONFIG.upcoming.alertClass
+                            : batchResolution.status === "all_full"
+                            ? BATCH_STATUS_CONFIG.full.alertClass
+                            : BATCH_STATUS_CONFIG.ended.alertClass
+                        }
+                      >
+                        <Clock />
+                        <AlertTitle>
+                          {batchResolution.nextBatch
+                            ? batchResolution.status === "upcoming"
+                              ? "Inscrições ainda não abertas"
+                              : "Aguardando próximo lote"
+                            : batchResolution.status === "all_full"
+                            ? "Lotes esgotados"
+                            : "Lotes encerrados"}
+                        </AlertTitle>
+                        <AlertDescription className="text-current/90">
+                          {batchResolution.nextBatch
+                            ? `${batchResolution.nextBatch.name} (${hasPayment ? formatBatchPriceLabel(batchResolution.nextBatch.price) : "Gratuito"}) abre em ${formatBatchDateTime(batchResolution.nextBatch.start_at)} (${formatCountdownToBatchOpen(batchResolution.nextBatch.start_at)}).`
+                            : batchResolution.status === "all_full"
+                            ? "As vagas disponíveis para os lotes deste encontro foram preenchidas."
+                            : "O prazo de todos os lotes configurados já foi encerrado."}
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </CardContent>
                   <CardFooter className="border-t border-border/10 bg-muted/5 p-5 pt-0">
                     {hasRegistered ? (
@@ -1474,6 +1750,18 @@ export default function Events() {
                         className="mt-3 min-h-[44px] w-full rounded-xl bg-emerald-500/10 font-semibold text-emerald-600 dark:bg-emerald-500/5 dark:text-emerald-400"
                       >
                         Inscrito <CheckCircle2 className="ml-1.5 h-4 w-4" />
+                      </Button>
+                    ) : isBatchBlocked ? (
+                      <Button
+                        disabled
+                        variant="outline"
+                        className="mt-3 min-h-[44px] w-full rounded-xl font-bold"
+                      >
+                        {batchResolution.nextBatch
+                          ? "Aguardando Abertura de Lote"
+                          : batchResolution.status === "all_full"
+                          ? "Lotes Esgotados"
+                          : "Lotes Encerrados"}
                       </Button>
                     ) : isRetreatFull ? (
                       isOnWaitlist ? (

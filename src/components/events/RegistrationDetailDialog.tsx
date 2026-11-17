@@ -41,6 +41,7 @@ import {
   RotateCcw,
   AlertTriangle,
   Clock,
+  Layers,
 } from "lucide-react";
 import {
   SERVICE_TEAMS,
@@ -50,6 +51,7 @@ import {
 import supabase from "@/lib/supabase";
 import { toast } from "sonner";
 import { formatTimeBR } from "@/lib/utils";
+import { formatBatchPriceLabel } from "@/lib/retreatBatches";
 import type { Database } from "@/lib/database.types";
 import { THEME_CLASSES } from "@/constants/colors";
 
@@ -72,6 +74,11 @@ export type RegistrationWithDetails = Database["public"]["Tables"]["registration
     name: string;
     gender_type: string | null;
     capacity: number;
+  } | null;
+  retreat_batches?: {
+    id: string;
+    name: string;
+    price: number;
   } | null;
 };
 
@@ -558,6 +565,26 @@ export function RegistrationDetailDialog({
                   }`}>
                     {isCoupon && <Ticket className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />}
                     {registration.payment_reference}
+                  </span>
+                </div>
+              )}
+
+              {(registration.retreat_batches ||
+                (registration.batch_price_snapshot !== null &&
+                  registration.batch_price_snapshot !== undefined)) && (
+                <div className="sm:col-span-2 border-t border-border/30 pt-2 mt-1 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-muted-foreground font-semibold flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-primary" />
+                    Lote da Inscrição
+                  </span>
+                  <span className="font-bold text-foreground">
+                    {registration.retreat_batches?.name || "Lote arquivado"}
+                    {registration.batch_price_snapshot !== null &&
+                      registration.batch_price_snapshot !== undefined && (
+                        <span className="text-muted-foreground font-medium ml-1.5">
+                          ({formatBatchPriceLabel(Number(registration.batch_price_snapshot))})
+                        </span>
+                      )}
                   </span>
                 </div>
               )}

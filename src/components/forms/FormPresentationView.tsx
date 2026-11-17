@@ -13,7 +13,14 @@ import {
   CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import type { FormPresentationPage } from "@/lib/forms";
+import {
+  formatBatchDateTime,
+  formatBatchPriceLabel,
+  type RetreatBatch,
+} from "@/lib/retreatBatches";
+import { BATCH_STATUS_CONFIG } from "@/constants/colors";
 
 interface FormPresentationViewProps {
   presentation: FormPresentationPage;
@@ -26,6 +33,7 @@ interface FormPresentationViewProps {
     price?: number | null;
     has_payment?: boolean | null;
   } | null;
+  activeBatch?: RetreatBatch | null;
   onStart: () => void;
   isPreviewMode?: boolean;
 }
@@ -45,6 +53,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
 export function FormPresentationView({
   presentation,
   retreat,
+  activeBatch,
   onStart,
   isPreviewMode = false,
 }: FormPresentationViewProps) {
@@ -124,7 +133,7 @@ export function FormPresentationView({
       {/* Body Content */}
       <div className="p-5 sm:p-7 space-y-6">
         {/* Event Quick Details Badges */}
-        {(datesFormatted || retreat?.location_text) && (
+        {(datesFormatted || retreat?.location_text || activeBatch) && (
           <div className="flex flex-wrap items-center gap-2.5 pb-2 border-b border-border/60 text-xs text-muted-foreground">
             {datesFormatted && (
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-muted/60 border border-border/50 text-foreground font-semibold">
@@ -137,6 +146,18 @@ export function FormPresentationView({
                 <MapPin className="w-3.5 h-3.5 text-primary" />
                 <span>{retreat.location_text}</span>
               </div>
+            )}
+            {activeBatch && (
+              <Badge
+                variant="outline"
+                className={`px-3 py-1 text-xs font-semibold ${BATCH_STATUS_CONFIG.active.badgeClass}`}
+              >
+                {activeBatch.name} •{" "}
+                {retreat?.has_payment === false
+                  ? "Gratuito"
+                  : formatBatchPriceLabel(Number(activeBatch.price))}
+                {" "}• até {formatBatchDateTime(activeBatch.end_at)}
+              </Badge>
             )}
           </div>
         )}
@@ -192,6 +213,20 @@ export function FormPresentationView({
                     )}
                   </div>
                 ))}
+              </div>
+            ) : activeBatch ? (
+              <div className="p-4 rounded-xl border border-border/70 bg-card space-y-1 shadow-xs max-w-sm">
+                <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  {activeBatch.name}
+                </div>
+                <div className="text-xl sm:text-2xl font-extrabold text-foreground tracking-tight">
+                  {retreat?.has_payment === false
+                    ? "Gratuito"
+                    : formatBatchPriceLabel(Number(activeBatch.price))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Vigente até {formatBatchDateTime(activeBatch.end_at)}
+                </p>
               </div>
             ) : retreat?.price !== undefined && retreat?.price !== null ? (
               <div className="p-4 rounded-xl border border-border/70 bg-card space-y-1 shadow-xs max-w-sm">

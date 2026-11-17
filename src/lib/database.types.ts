@@ -575,6 +575,8 @@ export type Database = {
       }
       registrations: {
         Row: {
+          batch_id: string | null
+          batch_price_snapshot: number | null
           cancellation_reason: string | null
           cancelled_at: string | null
           checked_in_at: string | null
@@ -596,6 +598,8 @@ export type Database = {
           status: "confirmado" | "presente" | "cancelado"
         }
         Insert: {
+          batch_id?: string | null
+          batch_price_snapshot?: number | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           checked_in_at?: string | null
@@ -617,6 +621,8 @@ export type Database = {
           status?: "confirmado" | "presente" | "cancelado"
         }
         Update: {
+          batch_id?: string | null
+          batch_price_snapshot?: number | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           checked_in_at?: string | null
@@ -638,6 +644,13 @@ export type Database = {
           status?: "confirmado" | "presente" | "cancelado"
         }
         Relationships: [
+          {
+            foreignKeyName: "registrations_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "retreat_batches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "registrations_checked_in_by_fkey"
             columns: ["checked_in_by"]
@@ -671,6 +684,50 @@ export type Database = {
             columns: ["room_id"]
             isOneToOne: false
             referencedRelation: "retreat_rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retreat_batches: {
+        Row: {
+          created_at: string
+          end_at: string
+          id: string
+          max_spots: number | null
+          name: string
+          price: number
+          retreat_id: string
+          sort_order: number
+          start_at: string
+        }
+        Insert: {
+          created_at?: string
+          end_at: string
+          id?: string
+          max_spots?: number | null
+          name: string
+          price?: number
+          retreat_id: string
+          sort_order?: number
+          start_at: string
+        }
+        Update: {
+          created_at?: string
+          end_at?: string
+          id?: string
+          max_spots?: number | null
+          name?: string
+          price?: number
+          retreat_id?: string
+          sort_order?: number
+          start_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retreat_batches_retreat_id_fkey"
+            columns: ["retreat_id"]
+            isOneToOne: false
+            referencedRelation: "retreats"
             referencedColumns: ["id"]
           },
         ]
@@ -1024,6 +1081,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_retreat_batch_counts: {
+        Args: { p_retreat_ids: string[] }
+        Returns: {
+          active_count: number
+          batch_id: string
+          retreat_id: string
+        }[]
+      }
       check_cpf_registration: {
         Args: { p_cpf: string }
         Returns: {

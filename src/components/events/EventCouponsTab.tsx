@@ -54,13 +54,21 @@ interface EventCouponsTabProps {
   retreat: Retreat;
   eventId: string;
   formId?: string | null;
+  effectiveBasePrice?: number | null;
+  activeBatchName?: string | null;
 }
 
 export function EventCouponsTab({
   retreat,
   eventId,
   formId,
+  effectiveBasePrice,
+  activeBatchName,
 }: EventCouponsTabProps) {
+  const previewBasePrice =
+    effectiveBasePrice !== undefined && effectiveBasePrice !== null
+      ? effectiveBasePrice
+      : (retreat.price || 0);
   const [coupons, setCoupons] = useState<EventCoupon[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -888,22 +896,23 @@ export function EventCouponsTab({
                     <Badge variant="secondary" className="text-[11px] font-bold uppercase tracking-wider">
                       Desconto Parcial ({newDiscountPercent}%)
                     </Badge>
-                    {retreat.price && retreat.price > 0 && (
+                    {previewBasePrice > 0 && (
                       <span className="text-xs font-semibold text-muted-foreground">
-                        Preço base: R$ {retreat.price.toFixed(2).replace(".", ",")}
+                        {activeBatchName ? `Base (${activeBatchName}):` : "Preço base:"} R${" "}
+                        {previewBasePrice.toFixed(2).replace(".", ",")}
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground dark:text-blue-200/90 leading-relaxed">
-                    {retreat.price && retreat.price > 0 ? (
+                    {previewBasePrice > 0 ? (
                       <>
                         Aplicação de <strong>{newDiscountPercent}% de desconto</strong> sobre o valor do evento. O participante economizará{" "}
                         <strong className="text-emerald-600 dark:text-emerald-400">
-                          R$ {((retreat.price * newDiscountPercent) / 100).toFixed(2).replace(".", ",")}
+                          R$ {((previewBasePrice * newDiscountPercent) / 100).toFixed(2).replace(".", ",")}
                         </strong>{" "}
                         e pagará apenas{" "}
                         <strong className="text-foreground dark:text-white">
-                          R$ {(retreat.price - (retreat.price * newDiscountPercent) / 100).toFixed(2).replace(".", ",")}
+                          R$ {(previewBasePrice - (previewBasePrice * newDiscountPercent) / 100).toFixed(2).replace(".", ",")}
                         </strong>{" "}
                         no checkout.
                       </>
