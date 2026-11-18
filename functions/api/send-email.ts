@@ -1,14 +1,16 @@
-// Cloudflare Pages Function: /api/send-email
-// Disparo transacional de e-mails via Resend API
-
 interface Env {
   RESEND_API_KEY?: string
   RESEND_FROM_EMAIL?: string
 }
 
+interface PagesContext {
+  request: Request
+  env: Env
+}
+
 interface SendEmailPayload {
-  to: string | string[]
-  subject: string
+  to?: string | string[]
+  subject?: string
   html?: string
   text?: string
   from?: string
@@ -17,82 +19,84 @@ interface SendEmailPayload {
   bcc?: string | string[]
 }
 
-const corsHeaders = {
+const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 }
 
-export const onRequestOptions = async () => {
-  return new Response(null, {
-    status: 204,
-    headers: corsHeaders,
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json",
+    },
   })
 }
 
-export const onRequestPost = async (context: { request: Request; env: Env }) => {
-  const { request, env } = context
+export function onRequestOptions(): Response {
+  return new Response(null, { status: 204, headers: CORS_HEADERS })
+}
 
+export async function onRequestPost(context: PagesContext): Promise<Response> {
   try {
-    const resendApiKey = env.RESEND_API_KEY || ""
-    const defaultFrom = env.RESEND_FROM_EMAIL || "Igreja em Belo Horizonte <onboarding@resend.dev>"
+    const resendApiKey = context.env.RESEND_API_KEY
+    const defaultFrom =
+      context.env.RESEND_FROM_EMAIL ||
+      "Igreja em Belo Horizonte <notificacoes@igrejaembh.com.br>"
 
     if (!resendApiKey) {
-      return new Response(
-        JSON.stringify({ error: "RESEND_API_KEY não configurada no ambiente." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      return jsonResponse(
+        { error: "RESEND_API_KEY não configurada no ambiente do Cloudflare Pages." },
+        500
       )
     }
 
-    const body: SendEmailPayload = await request.json()
+    const body = (await context.request.json()) as SendEmailPayload
+    const { to, subject, html, text, from, reply_to, cc, bcc } = body || {}
 
-    if (!body.to || !body.subject || (!body.html && !body.text)) {
-      return new Response(
-        JSON.stringify({
+    if (!to || !subject || (!html && !text)) {
+      return jsonResponse(
+        {
           error: "Campos obrigatórios ausentes: 'to', 'subject' e ('html' ou 'text').",
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        },
+        400
       )
-    }
-
-    const payload = {
-      from: body.from || defaultFrom,
-      to: Array.isArray(body.to) ? body.to : [body.to],
-      subject: body.subject,
-      html: body.html,
-      text: body.text,
-      reply_to: body.reply_to,
-      cc: body.cc,
-      bcc: body.bcc,
     }
 
     const resendRes = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${resendApiKey}`,
+        Authorization: `Bearer ${resendApiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        from: from || defaultFrom,
+        to: Array.isArray(to) ? to : [to],
+        subject,
+        html,
+        text,
+        reply_to,
+        cc,
+        bcc,
+      }),
     })
 
-    const data = await resendRes.json()
+    const data = (await resendRes.json()) as Record<string, unknown>
 
     if (!resendRes.ok) {
-      return new Response(
-        JSON.stringify({ error: "Falha ao enviar e-mail pelo Resend.", details: data }),
-        { status: resendRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      console.error("Resend API Error (Cloudflare Pages Function):", data)
+      return jsonResponse(
+        { error: "Erro no disparo pelo provedor Resend", details: data },
+        resendRes.status
       )
     }
 
-    return new Response(JSON.stringify({ success: true, data }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    })
+    return jsonResponse({ success: true, data }, 200)
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err)
-    return new Response(
-      JSON.stringify({ error: "Erro interno no processamento do e-mail.", details: errorMsg }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    )
+    const message = err instanceof Error ? err.message : "Erro interno"
+    console.error("Erro interno em /api/send-email (Cloudflare Pages):", message)
+    return jsonResponse({ error: "Erro interno ao enviar e-mail", message }, 500)
   }
 }

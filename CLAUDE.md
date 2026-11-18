@@ -58,7 +58,9 @@ Você é um agente encarregado de criar componentes (React, Tailwind, shadcn/ui)
 
 ## 🛠️ Stack e Padrões Técnicos
 - **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, shadcn/ui.
-- **Backend / Database:** Supabase (PostgreSQL, Auth, RLS, Storage).
+- **Backend / Database:** Supabase (PostgreSQL, Auth, RLS, Storage, Edge Functions).
+- **Hospedagem, DNS & Serverless:** Cloudflare Pages (`igreja-bh`, `igrejaembh.com.br` em `main` e `dev.igrejaembh.com.br` em `dev`) + Cloudflare Pages Functions (`functions/api/`).
+- **E-mail Transacional:** Resend (domínio verificado `igrejaembh.com.br`, remetentes `@igrejaembh.com.br`), disparado via Edge Function `send-email` com fallback em `functions/api/send-email.ts`.
 - **Cores & Tokens:** Todas as cores DEVEM vir de `src/constants/colors.ts`. Nunca use valores hex/cores hardcoded.
 - **Acessibilidade:** WCAG AA (mínimo 4.5:1) e AAA (7.0:1) com suporte a `prefers-reduced-motion`.
 - **Formulários:** `react-hook-form` + `zod`.
