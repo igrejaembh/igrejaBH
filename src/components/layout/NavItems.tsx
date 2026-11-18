@@ -4,6 +4,7 @@ import {
   BookOpen,
   Calendar,
   ClipboardList,
+  Ticket,
   type LucideIcon,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { name: "Início", href: "/dashboard", icon: Home },
   { name: "Ensinos", href: "/ensinos", icon: BookOpen },
+  { name: "Minhas Inscrições", href: "/minhas-inscricoes", icon: Ticket },
   { name: "Gestão de Eventos", href: "/manage-events", icon: Calendar, requireManagement: true },
   { name: "Gestão do Corpo", href: "/gestao", icon: Users, requireManagement: true },
   { name: "Formulários", href: "/gestao/formularios", icon: ClipboardList, requireCanPost: true },

@@ -26,6 +26,7 @@ const Profile = lazy(() => import("./pages/Profile"))
 const CreatePost = lazy(() => import("./pages/CreatePost"))
 const Ensinos = lazy(() => import("./pages/Ensinos"))
 const Events = lazy(() => import("./pages/Events"))
+const MyRegistrations = lazy(() => import("./pages/MyRegistrations"))
 const ParticipantPortal = lazy(() => import("./pages/ParticipantPortal"))
 const ManageEvents = lazy(() => import("./pages/ManageEvents"))
 const ManageEventDetail = lazy(() => import("./pages/ManageEventDetail"))
@@ -252,6 +253,7 @@ function App() {
               <Route path="/noticias/nova" element={<CreatePost />} />
               <Route path="/perfil" element={<Profile />} />
               <Route path="/eventos" element={<Events />} />
+              <Route path="/minhas-inscricoes" element={<MyRegistrations />} />
               <Route path="/eventos/inscricao/:registrationId" element={<ParticipantPortal />} />
               <Route path="/mensagens" element={<Messages />} />
 
