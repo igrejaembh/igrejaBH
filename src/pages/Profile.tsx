@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import {
   UserIcon,
   MailIcon,
@@ -19,6 +19,8 @@ import {
   InfoIcon,
   AlertCircleIcon,
   ArrowRightIcon,
+  UtensilsIcon,
+  PhoneCallIcon,
   type LucideIcon,
 } from "lucide-react"
 import supabase from "@/lib/supabase"
@@ -58,6 +60,7 @@ import {
   invalidateCurrentUserProfileCache,
 } from "@/hooks/useCurrentUserProfile"
 import { formatCPF } from "@/lib/cpfUtils"
+import { resolveProfileCityState } from "@/lib/participantProfile"
 import {
   formatDisplayGender,
   formatDisplayMaritalStatus,
@@ -68,6 +71,7 @@ import {
   type ProfileSectionKey,
 } from "@/lib/profile-config"
 import { CompleteProfileDialog } from "@/components/profile/CompleteProfileDialog"
+import { EditRetreatProfileDialog } from "@/components/profile/EditRetreatProfileDialog"
 import { cn } from "@/lib/utils"
 
 export interface ChildProfile {
@@ -124,6 +128,9 @@ interface UserProfile {
   dependents_count?: number | null
   housing_status?: string | null
   drivers_license?: string | null
+  city_state?: string | null
+  dietary_restrictions?: string | null
+  emergency_contact?: string | null
   children?: ChildProfile[]
 }
 
@@ -146,6 +153,8 @@ export default function Profile() {
     ProfileSectionKey | undefined
   >(undefined)
   const [isCompletingProfile, setIsCompletingProfile] = useState(false)
+  const [isEditingRetreatProfile, setIsEditingRetreatProfile] = useState(false)
+  const [retreatEditMode, setRetreatEditMode] = useState<"full" | "retreat_only">("full")
   const [isEditingFamily, setIsEditingFamily] = useState(false)
   const [isEditingAvatar, setIsEditingAvatar] = useState(false)
   const [isCropping, setIsCropping] = useState(false)
@@ -287,6 +296,9 @@ export default function Profile() {
           dependents_count: data.dependents_count,
           housing_status: data.housing_status,
           drivers_license: data.drivers_license,
+          city_state: data.city_state,
+          dietary_restrictions: data.dietary_restrictions,
+          emergency_contact: data.emergency_contact,
           children: childrenList,
         })
       }
@@ -295,7 +307,7 @@ export default function Profile() {
     } finally {
       setLoading(false)
     }
-  }, [navigate, searchParams])
+  }, [navigate, searchParams, isManagement])
 
   const fetchAllMembers = useCallback(async () => {
     if (allMembers.length > 0) return
@@ -321,6 +333,13 @@ export default function Profile() {
   // Abertura automática de diálogo via query param
   useEffect(() => {
     if (isOwnProfile && profile) {
+      if (!profile.is_church_linked) {
+        if (searchParams.get("edit") === "retreat" || searchParams.get("complete") === "true") {
+          setRetreatEditMode("full")
+          setIsEditingRetreatProfile(true)
+        }
+        return
+      }
       if (searchParams.get("complete") === "true") {
         setSelectedSingleSection(undefined)
         setIsCompletingProfile(true)
@@ -508,6 +527,9 @@ export default function Profile() {
   if (!profile) return null
 
   const getRole = () => {
+    if (!profile.is_church_linked) {
+      return "Participante de Retiros & Estudos"
+    }
     const roles = []
     if (profile.is_dev) roles.push("Desenvolvedor")
     if (profile.is_presbyter) roles.push("Presbítero")
@@ -529,7 +551,14 @@ export default function Profile() {
   const formatDate = (dateString?: string) => {
     if (!dateString) return "Não informado"
     try {
-      return format(new Date(dateString), "dd 'de' MMMM 'de' yyyy", {
+      const pureDate = /^\d{4}-\d{2}-\d{2}$/.test(dateString)
+      const parsed = pureDate
+        ? (() => {
+            const [y, m, d] = dateString.split("-").map(Number)
+            return new Date(y, m - 1, d)
+          })()
+        : new Date(dateString)
+      return format(parsed, "dd 'de' MMMM 'de' yyyy", {
         locale: ptBR,
       })
     } catch {
@@ -568,8 +597,8 @@ export default function Profile() {
     isPending?: boolean
   }) => (
     <div className="space-y-4">
-      <div className="flex items-center justify-between text-primary">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-primary">
+        <div className="flex items-center gap-2 min-w-0">
           <Icon className="size-5 shrink-0" />
           <h2 className="text-lg font-bold tracking-tight">{title}</h2>
           {isPending && (
@@ -582,10 +611,10 @@ export default function Profile() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 gap-2 rounded-full text-xs font-semibold hover:bg-primary/10 min-h-[44px]"
+            className="gap-2 rounded-full text-xs font-semibold hover:bg-primary/10 min-h-[44px] px-3"
             onClick={onEdit}
           >
-            <PencilIcon className="size-3" />
+            <PencilIcon className="size-3.5" />
             Editar
           </Button>
         )}
@@ -601,15 +630,18 @@ export default function Profile() {
     value,
     icon: ItemIcon,
     onClick,
+    multiline = false,
   }: {
     label: string
     value: string | undefined | null
     icon?: LucideIcon | React.ComponentType<{ className?: string }>
     onClick?: () => void
+    multiline?: boolean
   }) => (
     <div
       className={cn(
         "min-w-0 space-y-1",
+        multiline && "sm:col-span-2",
         onClick && value && "group cursor-pointer min-h-[44px]"
       )}
       onClick={value ? onClick : undefined}
@@ -624,13 +656,14 @@ export default function Profile() {
       <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
         {label}
       </p>
-      <div className="flex items-center gap-2">
+      <div className={cn("flex gap-2", multiline ? "items-start" : "items-center")}>
         {ItemIcon && (
-          <ItemIcon className="size-3.5 shrink-0 text-muted-foreground group-hover:text-primary transition-colors" />
+          <ItemIcon className={cn("size-3.5 shrink-0 text-muted-foreground group-hover:text-primary transition-colors", multiline && "mt-0.5")} />
         )}
         <p
           className={cn(
-            "truncate text-sm font-medium text-foreground",
+            "text-sm font-medium text-foreground",
+            multiline ? "whitespace-pre-wrap break-words" : "truncate",
             onClick && value && "group-hover:text-primary group-hover:underline transition-colors"
           )}
         >
@@ -642,6 +675,7 @@ export default function Profile() {
 
   const missingFieldsList = getMissingProfileFields(profile)
   const isProfileIncomplete = isOwnProfile && profile.is_church_linked && missingFieldsList.length > 0
+  const savedCityState = resolveProfileCityState(profile) || undefined
 
   return (
     <div className="animate-in space-y-8 duration-500 fade-in slide-in-from-bottom-4">
@@ -663,7 +697,9 @@ export default function Profile() {
         </h1>
         <p className="mt-1 text-muted-foreground">
           {isOwnProfile
-            ? "Gerencie suas informações pessoais e de vínculo com a igreja."
+            ? profile.is_church_linked
+              ? "Gerencie suas informações pessoais e de vínculo com a igreja."
+              : "Mantenha seus dados salvos para facilitar suas inscrições em retiros, encontros e estudos."
             : "Informações de cadastro e vínculos na igreja."}
         </p>
       </div>
@@ -695,13 +731,40 @@ export default function Profile() {
       )}
 
       {!profile.is_church_linked && isOwnProfile && (
-        <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 text-sm text-muted-foreground flex items-start gap-3">
-          <InfoIcon className="size-5 text-primary shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="font-semibold text-foreground">Conta com Acesso aos Estudos</p>
-            <p className="text-xs leading-relaxed">
-              Você possui acesso completo aos ensinos, materiais e à página inicial. Se você já caminha na Igreja em Belo Horizonte, solicite ao seu discipulador ou líder de Grupo Caseiro para registrar o seu vínculo.
-            </p>
+        <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 sm:p-5 text-sm text-muted-foreground flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <InfoIcon className="size-5 text-primary shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-semibold text-foreground">Participante de Retiros &amp; Estudos</p>
+              <p className="text-xs leading-relaxed">
+                Os dados salvos aqui preenchem automaticamente suas próximas inscrições em retiros e encontros. Se você já caminha na Igreja em Belo Horizonte, converse com seu discipulador ou líder de Grupo Caseiro para registrar o seu vínculo.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRetreatEditMode("full")
+                setIsEditingRetreatProfile(true)
+              }}
+              className="min-h-[44px] rounded-xl font-semibold gap-2 w-full sm:w-auto"
+            >
+              <PencilIcon className="size-3.5" />
+              Editar Dados
+            </Button>
+            <Button
+              asChild
+              size="sm"
+              className="min-h-[44px] rounded-xl font-bold gap-2 w-full sm:w-auto"
+            >
+              <Link to="/eventos">
+                Ver Retiros e Encontros
+                <ArrowRightIcon className="size-4" />
+              </Link>
+            </Button>
           </div>
         </div>
       )}
@@ -740,13 +803,9 @@ export default function Profile() {
                     <ShieldIcon className="size-3" />
                     {getRole()}
                   </div>
-                  {profile.is_church_linked ? (
+                  {profile.is_church_linked && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                       Discípulo Vinculado
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                      Conta de Estudos / Não Vinculado
                     </span>
                   )}
                 </div>
@@ -782,266 +841,374 @@ export default function Profile() {
         <div className="space-y-8 lg:col-span-2">
           <Card className="overflow-hidden rounded-3xl border-border bg-card/30 shadow-sm backdrop-blur-sm">
             <CardContent className="space-y-12 p-6 md:p-10">
-              {/* Informações Pessoais */}
-              <InfoSection
-                title="Informações Pessoais"
-                icon={UserIcon}
-                isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "personal")}
-                onEdit={
-                  isOwnProfile
-                    ? () => {
-                        setSelectedSingleSection("personal")
-                        setIsCompletingProfile(true)
-                      }
-                    : undefined
-                }
-              >
-                <InfoItem label="Nome Completo" value={profile.full_name} />
-                <InfoItem
-                  label="CPF"
-                  value={profile.cpf ? formatCPF(profile.cpf) : undefined}
-                  icon={FingerprintIcon}
-                />
-                <InfoItem
-                  label="Nascimento"
-                  value={formatDate(profile.birth_date)}
-                  icon={CalendarIcon}
-                />
-                <InfoItem
-                  label="Gênero"
-                  value={formatDisplayGender(profile.gender)}
-                />
-                <InfoItem
-                  label="Estado Civil"
-                  value={formatDisplayMaritalStatus(profile.marital_status)}
-                  icon={HeartIcon}
-                />
-              </InfoSection>
-
-              {/* Família */}
-              <InfoSection
-                title="Família"
-                icon={HeartIcon}
-                onEdit={
-                  isOwnProfile
-                    ? () => {
-                        setEditForm({
-                          spouse_id: profile.spouse_id,
-                          father_id: profile.father_id,
-                          mother_id: profile.mother_id,
-                        })
-                        fetchAllMembers()
-                        setIsEditingFamily(true)
-                      }
-                    : undefined
-                }
-              >
-                <InfoItem
-                  label="Cônjuge"
-                  value={profile.spouse_name}
-                  icon={HeartIcon}
-                />
-                <div className="grid grid-cols-1 gap-6 sm:col-span-2 sm:grid-cols-2">
-                  <InfoItem
-                    label="Pai"
-                    value={profile.father_name}
+              {!profile.is_church_linked ? (
+                <>
+                  {/* Dados Pessoais e Contato para Participante Recorrente */}
+                  <InfoSection
+                    title="Dados Pessoais e Contato"
                     icon={UserIcon}
-                  />
-                  <InfoItem
-                    label="Mãe"
-                    value={profile.mother_name}
-                    icon={UserIcon}
-                  />
-                </div>
+                    onEdit={
+                      isOwnProfile
+                        ? () => {
+                            setRetreatEditMode("full")
+                            setIsEditingRetreatProfile(true)
+                          }
+                        : undefined
+                    }
+                  >
+                    <InfoItem label="Nome Completo" value={profile.full_name} />
+                    <InfoItem
+                      label="E-mail"
+                      value={profile.email}
+                      icon={MailIcon}
+                    />
+                    <InfoItem
+                      label="Telefone / WhatsApp"
+                      value={profile.phone}
+                      icon={PhoneIcon}
+                    />
+                    <InfoItem
+                      label="CPF"
+                      value={profile.cpf ? formatCPF(profile.cpf) : undefined}
+                      icon={FingerprintIcon}
+                    />
+                    <InfoItem
+                      label="Nascimento"
+                      value={formatDate(profile.birth_date)}
+                      icon={CalendarIcon}
+                    />
+                    <InfoItem
+                      label="Gênero"
+                      value={profile.gender ? formatDisplayGender(profile.gender) : undefined}
+                    />
+                    <InfoItem
+                      label="Cidade / Estado"
+                      value={savedCityState}
+                      icon={MapPinIcon}
+                    />
+                  </InfoSection>
 
-                {profile.children && profile.children.length > 0 && (
-                  <div className="col-span-1 space-y-3 pt-3 border-t border-border/40 sm:col-span-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
-                        Filhos ({profile.children.length})
-                      </p>
+                  {/* Informações para Retiros e Encontros */}
+                  <InfoSection
+                    title="Informações para Retiros e Encontros"
+                    icon={UtensilsIcon}
+                    onEdit={
+                      isOwnProfile
+                        ? () => {
+                            setRetreatEditMode("full")
+                            setIsEditingRetreatProfile(true)
+                          }
+                        : undefined
+                    }
+                  >
+                    <InfoItem
+                      label="Contato de Emergência"
+                      value={profile.emergency_contact}
+                      icon={PhoneCallIcon}
+                    />
+                    <InfoItem
+                      label="Restrições Alimentares ou Alergias"
+                      value={profile.dietary_restrictions}
+                      icon={UtensilsIcon}
+                      multiline
+                    />
+                  </InfoSection>
+                </>
+              ) : (
+                <>
+                  {/* Informações Pessoais */}
+                  <InfoSection
+                    title="Informações Pessoais"
+                    icon={UserIcon}
+                    isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "personal")}
+                    onEdit={
+                      isOwnProfile
+                        ? () => {
+                            setSelectedSingleSection("personal")
+                            setIsCompletingProfile(true)
+                          }
+                        : undefined
+                    }
+                  >
+                    <InfoItem label="Nome Completo" value={profile.full_name} />
+                    <InfoItem
+                      label="CPF"
+                      value={profile.cpf ? formatCPF(profile.cpf) : undefined}
+                      icon={FingerprintIcon}
+                    />
+                    <InfoItem
+                      label="Nascimento"
+                      value={formatDate(profile.birth_date)}
+                      icon={CalendarIcon}
+                    />
+                    <InfoItem
+                      label="Gênero"
+                      value={profile.gender ? formatDisplayGender(profile.gender) : undefined}
+                    />
+                    <InfoItem
+                      label="Estado Civil"
+                      value={profile.marital_status ? formatDisplayMaritalStatus(profile.marital_status) : undefined}
+                      icon={HeartIcon}
+                    />
+                  </InfoSection>
+
+                  {/* Família */}
+                  <InfoSection
+                    title="Família"
+                    icon={HeartIcon}
+                    onEdit={
+                      isOwnProfile
+                        ? () => {
+                            setEditForm({
+                              spouse_id: profile.spouse_id,
+                              father_id: profile.father_id,
+                              mother_id: profile.mother_id,
+                            })
+                            fetchAllMembers()
+                            setIsEditingFamily(true)
+                          }
+                        : undefined
+                    }
+                  >
+                    <InfoItem
+                      label="Cônjuge"
+                      value={profile.spouse_name}
+                      icon={HeartIcon}
+                    />
+                    <div className="grid grid-cols-1 gap-6 sm:col-span-2 sm:grid-cols-2">
+                      <InfoItem
+                        label="Pai"
+                        value={profile.father_name}
+                        icon={UserIcon}
+                      />
+                      <InfoItem
+                        label="Mãe"
+                        value={profile.mother_name}
+                        icon={UserIcon}
+                      />
                     </div>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {profile.children.map((child) => {
-                        const age = getAge(child.birth_date)
-                        const relationLabel = getChildRelationLabel(child.gender)
-                        return (
-                          <div
-                            key={child.id}
-                            className="flex items-center justify-between rounded-xl border border-border/60 bg-background/50 p-3 min-h-[48px]"
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <Avatar className="size-10 shrink-0 border border-border/60">
-                                {child.avatar_url && (
-                                  <AvatarImage
-                                    src={child.avatar_url}
-                                    alt={child.full_name}
-                                  />
-                                )}
-                                <AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">
-                                  {getInitials(child.full_name)}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-foreground">
-                                  {child.full_name}
-                                </p>
-                                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                                  <span>{relationLabel}</span>
-                                  {age !== null && (
-                                    <>
-                                      <span>•</span>
-                                      <span>
-                                        {age} {age === 1 ? "ano" : "anos"}
-                                      </span>
-                                    </>
+
+                    {profile.children && profile.children.length > 0 && (
+                      <div className="col-span-1 space-y-3 pt-3 border-t border-border/40 sm:col-span-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
+                            Filhos ({profile.children.length})
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {profile.children.map((child) => {
+                            const age = getAge(child.birth_date)
+                            const relationLabel = getChildRelationLabel(child.gender)
+                            return (
+                              <div
+                                key={child.id}
+                                className="flex items-center justify-between rounded-xl border border-border/60 bg-background/50 p-3 min-h-[48px]"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <Avatar className="size-10 shrink-0 border border-border/60">
+                                    {child.avatar_url && (
+                                      <AvatarImage
+                                        src={child.avatar_url}
+                                        alt={child.full_name}
+                                      />
+                                    )}
+                                    <AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">
+                                      {getInitials(child.full_name)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-foreground">
+                                      {child.full_name}
+                                    </p>
+                                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                      <span>{relationLabel}</span>
+                                      {age !== null && (
+                                        <>
+                                          <span>•</span>
+                                          <span>
+                                            {age} {age === 1 ? "ano" : "anos"}
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0 ml-2">
+                                  {child.is_baptized || child.baptism_date ? (
+                                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-500/20 dark:text-emerald-400">
+                                      Batizado(a)
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-medium text-zinc-700 border border-zinc-500/20 dark:text-zinc-300">
+                                      Não batizado(a)
+                                    </span>
                                   )}
                                 </div>
                               </div>
-                            </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </InfoSection>
 
-                            <div className="flex items-center gap-2 shrink-0 ml-2">
-                              {child.is_baptized || child.baptism_date ? (
-                                <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-500/20 dark:text-emerald-400">
-                                  Batizado(a)
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-medium text-zinc-700 border border-zinc-500/20 dark:text-zinc-300">
-                                  Não batizado(a)
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-              </InfoSection>
-
-              {/* Informações de Contato */}
-              <InfoSection
-                title="Contato"
-                icon={PhoneIcon}
-                isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "contact")}
-                onEdit={
-                  isOwnProfile
-                    ? () => {
-                        setSelectedSingleSection("contact")
-                        setIsCompletingProfile(true)
-                      }
-                    : undefined
-                }
-              >
-                <InfoItem
-                  label="E-mail"
-                  value={profile.email}
-                  icon={MailIcon}
-                />
-                <InfoItem
-                  label="Telefone"
-                  value={profile.phone}
-                  icon={PhoneIcon}
-                />
-              </InfoSection>
-
-              {/* Endereço Residencial */}
-              <InfoSection
-                title="Endereço"
-                icon={MapPinIcon}
-                isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "address")}
-                onEdit={
-                  isOwnProfile
-                    ? () => {
-                        setSelectedSingleSection("address")
-                        setIsCompletingProfile(true)
-                      }
-                    : undefined
-                }
-              >
-                <div className="grid grid-cols-1 gap-6 sm:col-span-2 sm:grid-cols-2">
-                  <InfoItem label="Rua" value={profile.address_street} />
-                  <div className="grid grid-cols-2 gap-4">
-                    <InfoItem label="Número" value={profile.address_number} />
+                  {/* Informações de Contato */}
+                  <InfoSection
+                    title="Contato"
+                    icon={PhoneIcon}
+                    isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "contact")}
+                    onEdit={
+                      isOwnProfile
+                        ? () => {
+                            setSelectedSingleSection("contact")
+                            setIsCompletingProfile(true)
+                          }
+                        : undefined
+                    }
+                  >
                     <InfoItem
-                      label="Complemento"
-                      value={profile.address_complement}
+                      label="E-mail"
+                      value={profile.email}
+                      icon={MailIcon}
                     />
-                  </div>
-                  <InfoItem
-                    label="Bairro"
-                    value={profile.address_neighborhood}
-                  />
-                  <div className="grid grid-cols-2 gap-4">
-                    <InfoItem label="Cidade" value={profile.address_city} />
-                    <InfoItem label="Estado" value={profile.address_state} />
-                  </div>
-                  <InfoItem label="CEP" value={profile.address_zip_code} />
-                </div>
-              </InfoSection>
+                    <InfoItem
+                      label="Telefone"
+                      value={profile.phone}
+                      icon={PhoneIcon}
+                    />
+                  </InfoSection>
 
-              {/* Vínculos */}
-              <InfoSection title="Vínculos" icon={UsersIcon}>
-                <InfoItem
-                  label="Batismo"
-                  value={
-                    profile.is_baptized
-                      ? profile.baptism_date
-                        ? formatDate(profile.baptism_date)
-                        : "Sim (Data não informada)"
-                      : "Não batizado"
-                  }
-                  icon={CalendarIcon}
-                />
-                <InfoItem
-                  label="Grupo Caseiro"
-                  value={profile.home_group_name}
-                  icon={UsersIcon}
-                />
-                <InfoItem
-                  label="Discipulador"
-                  value={
-                    profile.discipler_name
-                      ? profile.is_custom_discipler
-                        ? `${profile.discipler_name} (Não cadastrado no sistema)`
-                        : profile.discipler_name
-                      : undefined
-                  }
-                  icon={UserIcon}
-                />
-              </InfoSection>
+                  {/* Endereço Residencial */}
+                  <InfoSection
+                    title="Endereço"
+                    icon={MapPinIcon}
+                    isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "address")}
+                    onEdit={
+                      isOwnProfile
+                        ? () => {
+                            setSelectedSingleSection("address")
+                            setIsCompletingProfile(true)
+                          }
+                        : undefined
+                    }
+                  >
+                    <div className="grid grid-cols-1 gap-6 sm:col-span-2 sm:grid-cols-2">
+                      <InfoItem label="Rua" value={profile.address_street} />
+                      <div className="grid grid-cols-2 gap-4">
+                        <InfoItem label="Número" value={profile.address_number} />
+                        <InfoItem
+                          label="Complemento"
+                          value={profile.address_complement}
+                        />
+                      </div>
+                      <InfoItem
+                        label="Bairro"
+                        value={profile.address_neighborhood}
+                      />
+                      <div className="grid grid-cols-2 gap-4">
+                        <InfoItem label="Cidade" value={profile.address_city} />
+                        <InfoItem label="Estado" value={profile.address_state} />
+                      </div>
+                      <InfoItem label="CEP" value={profile.address_zip_code} />
+                    </div>
+                  </InfoSection>
 
-              {/* Informações Socioeconômicas */}
-              <InfoSection
-                title="Informações Socioeconômicas"
-                icon={ShieldIcon}
-                isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "socio")}
-                onEdit={
-                  isOwnProfile
-                    ? () => {
-                        setSelectedSingleSection("socio")
-                        setIsCompletingProfile(true)
+                  {/* Vínculos */}
+                  <InfoSection title="Vínculos" icon={UsersIcon}>
+                    <InfoItem
+                      label="Batismo"
+                      value={
+                        profile.is_baptized
+                          ? profile.baptism_date
+                            ? formatDate(profile.baptism_date)
+                            : "Sim (Data não informada)"
+                          : "Não batizado"
                       }
-                    : undefined
-                }
-              >
-                <InfoItem label="Profissão" value={profile.occupation} />
-                <InfoItem
-                  label="Escolaridade"
-                  value={profile.education_level}
-                />
-                <InfoItem label="Vínculo" value={profile.employment_status} />
-                <InfoItem
-                  label="Renda Familiar"
-                  value={profile.household_income}
-                />
-                <InfoItem
-                  label="Dependentes"
-                  value={profile.dependents_count?.toString()}
-                />
-                <InfoItem label="Moradia" value={profile.housing_status} />
-                <InfoItem label="CNH" value={profile.drivers_license} />
-              </InfoSection>
+                      icon={CalendarIcon}
+                    />
+                    <InfoItem
+                      label="Grupo Caseiro"
+                      value={profile.home_group_name}
+                      icon={UsersIcon}
+                    />
+                    <InfoItem
+                      label="Discipulador"
+                      value={
+                        profile.discipler_name
+                          ? profile.is_custom_discipler
+                            ? `${profile.discipler_name} (Não cadastrado no sistema)`
+                            : profile.discipler_name
+                          : undefined
+                      }
+                      icon={UserIcon}
+                    />
+                  </InfoSection>
+
+                  {/* Informações Socioeconômicas */}
+                  <InfoSection
+                    title="Informações Socioeconômicas"
+                    icon={ShieldIcon}
+                    isPending={isOwnProfile && profile.is_church_linked && !isSectionComplete(profile, "socio")}
+                    onEdit={
+                      isOwnProfile
+                        ? () => {
+                            setSelectedSingleSection("socio")
+                            setIsCompletingProfile(true)
+                          }
+                        : undefined
+                    }
+                  >
+                    <InfoItem label="Profissão" value={profile.occupation} />
+                    <InfoItem
+                      label="Escolaridade"
+                      value={profile.education_level}
+                    />
+                    <InfoItem label="Vínculo" value={profile.employment_status} />
+                    <InfoItem
+                      label="Renda Familiar"
+                      value={profile.household_income}
+                    />
+                    <InfoItem
+                      label="Dependentes"
+                      value={profile.dependents_count?.toString()}
+                    />
+                    <InfoItem label="Moradia" value={profile.housing_status} />
+                    <InfoItem label="CNH" value={profile.drivers_license} />
+                  </InfoSection>
+
+                  {/* Preferências opcionais para retiros */}
+                  <InfoSection
+                    title="Informações para Retiros e Encontros"
+                    icon={UtensilsIcon}
+                    onEdit={
+                      isOwnProfile
+                        ? () => {
+                            setRetreatEditMode("retreat_only")
+                            setIsEditingRetreatProfile(true)
+                          }
+                        : undefined
+                    }
+                  >
+                    <InfoItem
+                      label="Cidade / Estado (Retiros)"
+                      value={savedCityState}
+                      icon={MapPinIcon}
+                    />
+                    <InfoItem
+                      label="Contato de Emergência"
+                      value={profile.emergency_contact}
+                      icon={PhoneCallIcon}
+                    />
+                    <InfoItem
+                      label="Restrições Alimentares ou Alergias"
+                      value={profile.dietary_restrictions}
+                      icon={UtensilsIcon}
+                      multiline
+                    />
+                  </InfoSection>
+                </>
+              )}
             </CardContent>
             <CardFooter className="flex items-center gap-4 border-t border-border/50 bg-primary/5 p-8">
               <div className="rounded-2xl bg-primary/20 p-3">
@@ -1061,12 +1228,23 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* Dialog Unificado: Completar Incremental ou Editar Categoria */}
-      <CompleteProfileDialog
-        open={isCompletingProfile}
-        onOpenChange={setIsCompletingProfile}
+      {/* Dialog Unificado: Completar Incremental ou Editar Categoria (Discípulo vinculado) */}
+      {profile.is_church_linked && (
+        <CompleteProfileDialog
+          open={isCompletingProfile}
+          onOpenChange={setIsCompletingProfile}
+          profile={profile}
+          singleSection={selectedSingleSection}
+          onSuccess={fetchProfile}
+        />
+      )}
+
+      {/* Dialog: Dados de Participante de Retiros (Não vinculados ou preferências de retiro) */}
+      <EditRetreatProfileDialog
+        open={isEditingRetreatProfile}
+        onOpenChange={setIsEditingRetreatProfile}
         profile={profile}
-        singleSection={selectedSingleSection}
+        mode={retreatEditMode}
         onSuccess={fetchProfile}
       />
 

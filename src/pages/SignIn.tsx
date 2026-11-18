@@ -25,22 +25,28 @@ import { EyeIcon, EyeOffIcon, LockIcon, MailIcon, Loader2, ArrowLeft } from "luc
 import { useState } from "react"
 import supabase from "@/lib/supabase"
 import { isRestrictedGroupMode } from "@/lib/restrictedMode"
-import { Link, useNavigate, useLocation } from "react-router-dom"
+import {
+  claimParticipantRegistrationsSafe,
+  getSafeRedirectPath,
+} from "@/lib/participantProfile"
+import { Link, useNavigate, useLocation, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 
 export default function SignIn() {
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const fromLocation = (location.state as { from?: { pathname?: string; search?: string } })?.from
+  const redirectParam = getSafeRedirectPath(searchParams.get("redirect"))
   const isRestricted = isRestrictedGroupMode() || fromLocation?.pathname === "/meu-grupo"
 
   const signForm = useForm<SignInValue>({
     resolver: zodResolver(signInSchema),
     defaultValues: {
-      email: "",
+      email: searchParams.get("email") || "",
       password: "",
     },
   })
@@ -48,42 +54,45 @@ export default function SignIn() {
   async function onSubmit(data: SignInValue) {
     setLoading(true)
 
-    toast.promise(
-      supabase.auth
-        .signInWithPassword({
-          email: data.email.trim(),
-          password: data.password,
-        })
-        .then(({ error, data: authData }) => {
-          if (error) throw error
-          return authData
-        }),
-      {
-        loading: "Realizando login...",
-        success: () => {
-          const target = isRestricted
-            ? `${fromLocation?.pathname || "/meu-grupo"}${fromLocation?.search || ""}`
-            : fromLocation?.pathname || "/dashboard"
-          navigate(target, { replace: true })
-          return "Login realizado com sucesso!"
-        },
-        error: (error) => {
-          console.error("Error on sign in: ", error)
-          if (error instanceof Error) {
-            if (error.message === "Invalid login credentials") {
-              return "Email ou senha incorretos."
-            } else if (error.message === "Email not confirmed") {
-              return "Por favor, confirme seu e-mail antes de acessar."
-            }
-            return error.message
+    const signInOperation = async () => {
+      const { error, data: authData } = await supabase.auth.signInWithPassword({
+        email: data.email.trim(),
+        password: data.password,
+      })
+      if (error) throw error
+      const claimedCount = await claimParticipantRegistrationsSafe()
+      return { authData, claimedCount }
+    }
+
+    toast.promise(signInOperation(), {
+      loading: "Realizando login...",
+      success: ({ claimedCount }) => {
+        const target = isRestricted
+          ? `${fromLocation?.pathname || "/meu-grupo"}${fromLocation?.search || ""}`
+          : fromLocation?.pathname
+            ? `${fromLocation.pathname}${fromLocation.search || ""}`
+            : redirectParam || "/dashboard"
+        navigate(target, { replace: true })
+        return claimedCount > 0
+          ? `Login realizado! ${claimedCount} inscrição(ões) anteriores vinculada(s) à sua conta.`
+          : "Login realizado com sucesso!"
+      },
+      error: (error) => {
+        console.error("Error on sign in: ", error)
+        if (error instanceof Error) {
+          if (error.message === "Invalid login credentials") {
+            return "Email ou senha incorretos."
+          } else if (error.message === "Email not confirmed") {
+            return "Por favor, confirme seu e-mail antes de acessar."
           }
-          return "Erro ao realizar login. Tente novamente."
-        },
-        finally: () => {
-          setLoading(false)
-        },
-      }
-    )
+          return error.message
+        }
+        return "Erro ao realizar login. Tente novamente."
+      },
+      finally: () => {
+        setLoading(false)
+      },
+    })
   }
 
   return (

@@ -431,14 +431,17 @@ export type Database = {
           is_baptized: boolean
           birth_date: string | null
           can_post: boolean | null
+          city_state: string | null
           cpf: string | null
           created_at: string
           dependents_count: number | null
+          dietary_restrictions: string | null
           custom_discipler_name: string | null
           discipler_id: string | null
           drivers_license: string | null
           education_level: string | null
           email: string | null
+          emergency_contact: string | null
           employment_status: string | null
           father_id: string | null
           full_name: string
@@ -471,14 +474,17 @@ export type Database = {
           is_baptized?: boolean
           birth_date?: string | null
           can_post?: boolean | null
+          city_state?: string | null
           cpf?: string | null
           created_at?: string
           dependents_count?: number | null
+          dietary_restrictions?: string | null
           custom_discipler_name?: string | null
           discipler_id?: string | null
           drivers_license?: string | null
           education_level?: string | null
           email?: string | null
+          emergency_contact?: string | null
           employment_status?: string | null
           father_id?: string | null
           full_name: string
@@ -511,14 +517,17 @@ export type Database = {
           is_baptized?: boolean
           birth_date?: string | null
           can_post?: boolean | null
+          city_state?: string | null
           cpf?: string | null
           created_at?: string
           dependents_count?: number | null
+          dietary_restrictions?: string | null
           custom_discipler_name?: string | null
           discipler_id?: string | null
           drivers_license?: string | null
           education_level?: string | null
           email?: string | null
+          emergency_contact?: string | null
           employment_status?: string | null
           father_id?: string | null
           full_name?: string
@@ -1085,6 +1094,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_participant_registrations: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
       check_cpf_registration: {
         Args: { p_cpf: string }
         Returns: {
