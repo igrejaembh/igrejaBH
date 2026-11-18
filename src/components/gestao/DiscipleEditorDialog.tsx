@@ -49,6 +49,7 @@ export interface DiscipleEditorDialogProps {
   initialTransformToBaptized?: boolean
   initialTransformToLinked?: boolean
   lockGroupSelectionOnCreate?: boolean
+  hideOptionalFieldsOnEdit?: boolean
   onSuccess: () => void
 }
 
@@ -131,9 +132,11 @@ export function DiscipleEditorDialog({
   initialTransformToBaptized = false,
   initialTransformToLinked = false,
   lockGroupSelectionOnCreate = false,
+  hideOptionalFieldsOnEdit = false,
   onSuccess,
 }: DiscipleEditorDialogProps) {
   const isEditing = !!disciple
+  const hideOptionalFields = isEditing && hideOptionalFieldsOnEdit
   const isTransformingLinked = Boolean(
     initialTransformToLinked || (disciple && disciple.is_church_linked === false)
   )
@@ -611,37 +614,39 @@ export function DiscipleEditorDialog({
       return
     }
 
-    if (cleanEmail) {
-      if (!EMAIL_REGEX.test(cleanEmail)) {
-        toast.error("Informe um e-mail válido.")
-        return
+    if (!hideOptionalFields) {
+      if (cleanEmail) {
+        if (!EMAIL_REGEX.test(cleanEmail)) {
+          toast.error("Informe um e-mail válido.")
+          return
+        }
+        const duplicateEmail = allProfiles.find(
+          (p) => p.id !== disciple?.id && p.email?.trim().toLowerCase() === cleanEmail
+        )
+        if (duplicateEmail) {
+          toast.error(`Este e-mail já está cadastrado para ${duplicateEmail.full_name}.`)
+          return
+        }
       }
-      const duplicateEmail = allProfiles.find(
-        (p) => p.id !== disciple?.id && p.email?.trim().toLowerCase() === cleanEmail
-      )
-      if (duplicateEmail) {
-        toast.error(`Este e-mail já está cadastrado para ${duplicateEmail.full_name}.`)
-        return
-      }
-    }
 
-    if (cleanBaptism && cleanBirth && cleanBaptism < cleanBirth) {
-      toast.error("A data de batismo não pode ser anterior à data de nascimento.")
-      return
-    }
-
-    if (cleanCPF) {
-      const previousCpf = disciple?.cpf?.replace(/\D/g, "") || ""
-      if (cleanCPF.length !== 11 || (cleanCPF !== previousCpf && !isValidCPF(cleanCPF))) {
-        toast.error("Informe um CPF válido.")
+      if (cleanBaptism && cleanBirth && cleanBaptism < cleanBirth) {
+        toast.error("A data de batismo não pode ser anterior à data de nascimento.")
         return
       }
-      const duplicateCpf = allProfiles.find(
-        (p) => p.id !== disciple?.id && p.cpf?.replace(/\D/g, "") === cleanCPF
-      )
-      if (duplicateCpf) {
-        toast.error(`Este CPF já está cadastrado para ${duplicateCpf.full_name}.`)
-        return
+
+      if (cleanCPF) {
+        const previousCpf = disciple?.cpf?.replace(/\D/g, "") || ""
+        if (cleanCPF.length !== 11 || (cleanCPF !== previousCpf && !isValidCPF(cleanCPF))) {
+          toast.error("Informe um CPF válido.")
+          return
+        }
+        const duplicateCpf = allProfiles.find(
+          (p) => p.id !== disciple?.id && p.cpf?.replace(/\D/g, "") === cleanCPF
+        )
+        if (duplicateCpf) {
+          toast.error(`Este CPF já está cadastrado para ${duplicateCpf.full_name}.`)
+          return
+        }
       }
     }
 
@@ -1211,62 +1216,66 @@ export function DiscipleEditorDialog({
                 </div>
               </FieldGroup>
 
-              <Separator />
+              {!hideOptionalFields && (
+                <>
+                  <Separator />
 
-              {/* Opcionais */}
-              <div className="flex flex-col gap-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Opcionais
-                </span>
-                <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="disciple-email">E-mail</FieldLabel>
-                    <Input
-                      id="disciple-email"
-                      type="email"
-                      autoComplete="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="exemplo@email.com"
-                      className="h-11 min-h-[44px] rounded-xl text-sm"
-                    />
-                  </Field>
+                  {/* Opcionais */}
+                  <div className="flex flex-col gap-3">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Opcionais
+                    </span>
+                    <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <Field>
+                        <FieldLabel htmlFor="disciple-email">E-mail</FieldLabel>
+                        <Input
+                          id="disciple-email"
+                          type="email"
+                          autoComplete="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="exemplo@email.com"
+                          className="h-11 min-h-[44px] rounded-xl text-sm"
+                        />
+                      </Field>
 
-                  <Field>
-                    <FieldLabel htmlFor="disciple-birth-date">Data de nascimento</FieldLabel>
-                    <Input
-                      id="disciple-birth-date"
-                      type="date"
-                      value={birthDate}
-                      onChange={(e) => setBirthDate(e.target.value)}
-                      className="h-11 min-h-[44px] rounded-xl text-sm"
-                    />
-                  </Field>
+                      <Field>
+                        <FieldLabel htmlFor="disciple-birth-date">Data de nascimento</FieldLabel>
+                        <Input
+                          id="disciple-birth-date"
+                          type="date"
+                          value={birthDate}
+                          onChange={(e) => setBirthDate(e.target.value)}
+                          className="h-11 min-h-[44px] rounded-xl text-sm"
+                        />
+                      </Field>
 
-                  <Field>
-                    <FieldLabel htmlFor="disciple-baptism-date">Data de batismo</FieldLabel>
-                    <Input
-                      id="disciple-baptism-date"
-                      type="date"
-                      value={baptismDate}
-                      onChange={(e) => setBaptismDate(e.target.value)}
-                      className="h-11 min-h-[44px] rounded-xl text-sm"
-                    />
-                  </Field>
+                      <Field>
+                        <FieldLabel htmlFor="disciple-baptism-date">Data de batismo</FieldLabel>
+                        <Input
+                          id="disciple-baptism-date"
+                          type="date"
+                          value={baptismDate}
+                          onChange={(e) => setBaptismDate(e.target.value)}
+                          className="h-11 min-h-[44px] rounded-xl text-sm"
+                        />
+                      </Field>
 
-                  <Field>
-                    <FieldLabel htmlFor="disciple-cpf">CPF</FieldLabel>
-                    <Input
-                      id="disciple-cpf"
-                      inputMode="numeric"
-                      value={cpf}
-                      onChange={(e) => setCpf(formatCPF(e.target.value))}
-                      placeholder="000.000.000-00"
-                      className="h-11 min-h-[44px] rounded-xl text-sm"
-                    />
-                  </Field>
-                </FieldGroup>
-              </div>
+                      <Field>
+                        <FieldLabel htmlFor="disciple-cpf">CPF</FieldLabel>
+                        <Input
+                          id="disciple-cpf"
+                          inputMode="numeric"
+                          value={cpf}
+                          onChange={(e) => setCpf(formatCPF(e.target.value))}
+                          placeholder="000.000.000-00"
+                          className="h-11 min-h-[44px] rounded-xl text-sm"
+                        />
+                      </Field>
+                    </FieldGroup>
+                  </div>
+                </>
+              )}
             </>
           )}
 

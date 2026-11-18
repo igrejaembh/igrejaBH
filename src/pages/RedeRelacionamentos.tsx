@@ -1467,6 +1467,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         }
         isTier3={!singleGroupMode && isTier3}
         lockGroupSelectionOnCreate={singleGroupMode}
+        hideOptionalFieldsOnEdit={singleGroupMode}
         onSuccess={() => loadData(false)}
       />
 
