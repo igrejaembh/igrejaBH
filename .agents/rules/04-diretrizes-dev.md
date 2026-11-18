@@ -33,6 +33,8 @@
 
 ## 6. MCP e Servidores
 - **Supabase MCP (`supabase-mcp-server`):** Ao ser instruído a alterar o banco de dados (backend), o agente deve propor a migração `.sql` ou utilizar os servidores MCP configurados, nunca alterar arquivos não relacionados.
+- **Cloudflare MCP (`cloudflare-api`):** Gerencia DNS da zona `igrejaembh.com.br`, o projeto Cloudflare Pages (`igreja-bh`), variáveis de ambiente (`preview` e `production`) e Workers/Pages Functions (`functions/api/`).
+- **Resend MCP (`resend_igrejaBH`):** Gerencia o domínio verificado `igrejaembh.com.br`, chaves de API (`RESEND_API_KEY`), templates e métricas de e-mails transacionais.
 - **Accessibility MCP (`accessibility`):** O agente deve obrigatoriamente validar contrastes e conformidade WCAG AA/AAA (`are-colors-accessible`, `get-color-contrast`, `use-light-or-dark`) ao definir ou alterar cores no arquivo `src/constants/colors.ts` ou nos componentes de UI.
 - **Stitch MCP (`StitchMCP`):** O agente deve utilizar as ferramentas do Stitch (`generate_screen_from_text`, `generate_variants`, `upload_design_md`, `apply_design_system`) para prototipar telas novas, gerar variações de interface e manter o alinhamento com o design system antes de codificar telas complexas.
 - **Constantes de Cores (`src/constants/colors.ts`):** É regra estrita manter todas as cores do projeto registradas em `src/constants/colors.ts`. Qualquer cor nova em tempo de execução ou elemento visual DEVE ser adicionada e importada dessa constante.

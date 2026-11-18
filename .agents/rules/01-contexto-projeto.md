@@ -15,3 +15,10 @@ A estrutura de dados central não é o indivíduo isolado, mas a quem ele está 
 
 ## 4. Diretrizes Teológicas, Conteúdo e Design
 Consulte obrigatoriamente [06-diretrizes-conteudo-design.md](file:///c:/Users/ggoes/Documents/igrejaBH/.agents/rules/06-diretrizes-conteudo-design.md) e [docs/DIRETRIZES_CONTEUDO_DESIGN.md](file:///c:/Users/ggoes/Documents/igrejaBH/docs/DIRETRIZES_CONTEUDO_DESIGN.md) para a aplicação prática dos 7 princípios teológicos no design, copywriting e arquitetura de informação.
+
+## 5. Infraestrutura e Arquitetura de Deploy (Cloudflare + Resend + Supabase)
+- **Hospedagem e DNS:** O projeto é hospedado no **Cloudflare Pages** (projeto `igreja-bh`), com DNS gerenciado na zona `igrejaembh.com.br`:
+  - **Produção (`main`):** `https://igrejaembh.com.br` e `https://www.igrejaembh.com.br`
+  - **Homologação (`dev`):** `https://dev.igrejaembh.com.br`
+- **Rotas Serverless / APIs:** Endpoints `/api/*` rodam como **Cloudflare Pages Functions** em `functions/api/` (ex: `functions/api/send-email.ts`).
+- **E-mails Transacionais:** Gerenciados via **Resend** com o domínio verificado `igrejaembh.com.br` (`sa-east-1`), utilizando `src/services/emailService.ts` (primário via Supabase Edge Function `send-email`, fallback via `/api/send-email` no Cloudflare Pages). As chaves (`RESEND_API_KEY`) devem ficar exclusivamente nas variáveis de ambiente/secrets do Cloudflare Pages e Supabase, nunca no código-fonte.

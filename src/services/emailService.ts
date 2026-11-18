@@ -16,7 +16,7 @@ export interface SendEmailResponse {
 }
 
 /**
- * Envia um e-mail transacional via Supabase Edge Function com fallback para rota Vercel API.
+ * Envia um e-mail transacional via Supabase Edge Function com fallback para Cloudflare Pages Function (/api/send-email).
  */
 export async function sendEmail(options: SendEmailOptions): Promise<SendEmailResponse> {
   const { to, subject, html, text, from, reply_to } = options
@@ -35,10 +35,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
       console.warn("Aviso ao invocar Edge Function send-email, tentando fallback:", error)
     }
   } catch (err) {
-    console.warn("Falha na Edge Function, acionando fallback local/Vercel:", err)
+    console.warn("Falha na Edge Function, acionando fallback Cloudflare Pages (/api/send-email):", err)
   }
 
-  // 2. Fallback para rota serverless do Vercel (/api/send-email)
+  // 2. Fallback para Cloudflare Pages Function (/api/send-email)
   try {
     const res = await fetch("/api/send-email", {
       method: "POST",
