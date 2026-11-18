@@ -1,9 +1,9 @@
-import { Phone, Edit, MessageSquare, Shield, Baby, BookOpen, UserCheck, MapPin, AlertCircle, HeartHandshake } from "lucide-react"
+import { Phone, Mail, Edit, MessageSquare, Shield, Baby, BookOpen, UserCheck, MapPin, AlertCircle, HeartHandshake } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { Database } from "@/lib/database.types"
-import { THEME_CLASSES } from "@/constants/colors"
+import { THEME_CLASSES, GRAPH_UI_CLASSES } from "@/constants/colors"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 
@@ -51,7 +51,8 @@ export function DiscipleCard({
     !disciple.discipler_id &&
     !disciple.spouse_id &&
     !disciple.is_presbyter &&
-    !disciple.is_deacon
+    !disciple.is_deacon &&
+    !disciple.is_dev
   const cleanPhone = disciple.phone?.replace(/\D/g, "")
   const hasPhone = !!cleanPhone && cleanPhone.length >= 10
   const whatsappUrl = hasPhone
@@ -70,6 +71,7 @@ export function DiscipleCard({
 
   // Identifica se necessita de discipulador (adultos que não têm discipulador e não são presbíteros/cobertura)
   const needsDiscipler = !isChild && !disciplerName && !disciple.is_presbyter && !isCoveredRoot
+  const needsEmail = !isChild && !disciple.email?.trim()
 
   return (
     <div className="flex flex-col justify-between rounded-2xl border border-border/80 bg-card p-4 shadow-xs transition-all hover:border-primary/40 hover:shadow-md sm:p-5">
@@ -162,6 +164,13 @@ export function DiscipleCard({
               <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" />
                 <span className="truncate font-medium text-foreground/90">{groupName}</span>
+              </div>
+            )}
+
+            {disciple.email && (
+              <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+                <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{disciple.email}</span>
               </div>
             )}
           </div>
@@ -279,9 +288,17 @@ export function DiscipleCard({
 
         {/* Alerta de Cuidado para quem não tem discipulador */}
         {needsDiscipler && (
-          <div className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 border border-amber-500/20">
-            <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className={`mt-2.5 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium border ${GRAPH_UI_CLASSES.inspectorWarningBox}`}>
+            <AlertCircle className={`h-3.5 w-3.5 shrink-0 ${GRAPH_UI_CLASSES.kpiWarningIcon}`} />
             <span>Defina um discipulador para acompanhar e orar com este irmão.</span>
+          </div>
+        )}
+
+        {/* Alerta para membro adulto sem e-mail obrigatório */}
+        {needsEmail && (
+          <div className={`mt-2.5 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium border ${GRAPH_UI_CLASSES.inspectorWarningBox}`}>
+            <Mail className={`h-3.5 w-3.5 shrink-0 ${GRAPH_UI_CLASSES.kpiWarningIcon}`} />
+            <span>E-mail obrigatório não informado. Clique em Editar para cadastrar.</span>
           </div>
         )}
 

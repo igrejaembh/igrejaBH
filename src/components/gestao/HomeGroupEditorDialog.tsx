@@ -304,7 +304,12 @@ export function HomeGroupEditorDialog({
       onOpenChange(false)
     } catch (err: unknown) {
       console.error("Erro ao salvar grupo:", err)
-      const message = err instanceof Error ? err.message : "Erro desconhecido."
+      const message =
+        err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string"
+          ? (err as { message: string }).message
+          : err instanceof Error
+          ? err.message
+          : "Erro desconhecido."
       toast.error(`Não foi possível salvar: ${message}`)
     } finally {
       setSaving(false)

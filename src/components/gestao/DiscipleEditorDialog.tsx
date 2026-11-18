@@ -21,6 +21,7 @@ import {
   User,
   Baby,
   Phone,
+  Mail,
   ChevronDown,
   ChevronUp,
   Trash2,
@@ -37,6 +38,7 @@ import {
 import { toast } from "sonner"
 import supabase from "@/lib/supabase"
 import type { Database } from "@/lib/database.types"
+import { GRAPH_UI_CLASSES } from "@/constants/colors"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"]
@@ -86,6 +88,30 @@ const normalizeGender = (val?: string | null): "M" | "F" => {
   const upper = val.toUpperCase().trim()
   if (upper === "F" || upper === "FEMININO" || upper === "MULHER") return "F"
   return "M"
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function extractErrorMessage(err: unknown, fallback: string): string {
+  if (err && typeof err === "object") {
+    const record = err as { code?: unknown; message?: unknown }
+    if (record.code === "23505" && typeof record.message === "string") {
+      if (record.message.includes("profiles_email_key")) {
+        return "Este e-mail já está cadastrado para outro irmão."
+      }
+      if (record.message.includes("profiles_cpf_key")) {
+        return "Este CPF já está cadastrado para outro irmão."
+      }
+      return "Registro duplicado no sistema."
+    }
+    if (typeof record.message === "string" && record.message.trim()) {
+      return record.message
+    }
+  }
+  if (err instanceof Error && err.message) {
+    return err.message
+  }
+  return fallback
 }
 
 export function DiscipleEditorDialog({
@@ -186,6 +212,7 @@ export function DiscipleEditorDialog({
         setGender("M")
         setHomeGroupId(defaultHomeGroupId || (homeGroups[0]?.id ?? ""))
         setDisciplerId("none")
+        setCustomDisciplerName("")
         setSpouseId("none")
         setFatherId("none")
         setMotherId("none")
@@ -422,13 +449,44 @@ export function DiscipleEditorDialog({
   }
 
   const handleSave = async () => {
+    const cleanEmail = email.trim().toLowerCase()
+    const cleanPhone = phone.replace(/\D/g, "") || null
+    const cleanCPF = cpf.replace(/\D/g, "") || null
+    const cleanBirth = birthDate.trim() || null
+    const cleanBaptism = baptismDate.trim() || null
+
     if (!fullName.trim()) {
       toast.error("O Nome é obrigatório.")
       return
     }
 
-    if (!birthDate.trim()) {
+    if (!isChild && !cleanEmail) {
+      toast.error("O E-mail é obrigatório.")
+      return
+    }
+
+    if (cleanEmail && !EMAIL_REGEX.test(cleanEmail)) {
+      toast.error("Informe um endereço de e-mail válido.")
+      return
+    }
+
+    if (cleanEmail) {
+      const duplicateEmail = allProfiles.find(
+        (p) => p.id !== disciple?.id && p.email?.trim().toLowerCase() === cleanEmail
+      )
+      if (duplicateEmail) {
+        toast.error(`Este e-mail já está cadastrado para ${duplicateEmail.full_name}.`)
+        return
+      }
+    }
+
+    if (!cleanBirth) {
       toast.error("A Data de Nascimento é obrigatória.")
+      return
+    }
+
+    if (!isChild && isBaptized && cleanBaptism && cleanBirth && cleanBaptism < cleanBirth) {
+      toast.error("A data de batismo não pode ser anterior à data de nascimento.")
       return
     }
 
@@ -442,14 +500,23 @@ export function DiscipleEditorDialog({
       return
     }
 
-    setSaving(true)
-    try {
-      const cleanPhone = phone.replace(/\D/g, "") || null
-      const cleanCPF = cpf.replace(/\D/g, "") || null
-      const cleanEmail = email.trim() ? email.trim().toLowerCase() : null
-      const cleanBirth = birthDate.trim() || null
-      const cleanBaptism = baptismDate.trim() || null
+    if (cleanCPF) {
+      if (cleanCPF.length !== 11) {
+        toast.error("Informe um CPF completo com 11 dígitos.")
+        return
+      }
+      const duplicateCpf = allProfiles.find(
+        (p) => p.id !== disciple?.id && p.cpf?.replace(/\D/g, "") === cleanCPF
+      )
+      if (duplicateCpf) {
+        toast.error(`Este CPF já está cadastrado para ${duplicateCpf.full_name}.`)
+        return
+      }
+    }
 
+    setSaving(true)
+    let profileSaved = false
+    try {
       let finalBaptism = cleanBaptism
       if (!isChild && disciple && checkIsChild(disciple) && !finalBaptism) {
         finalBaptism = new Date().toISOString().split("T")[0]
@@ -460,6 +527,16 @@ export function DiscipleEditorDialog({
         ? customDisciplerName.trim()
         : null
 
+      const nextMaritalStatus =
+        !isChild && spouseId !== "none"
+          ? "casado"
+          : !isChild &&
+            disciple?.spouse_id &&
+            spouseId === "none" &&
+            disciple?.marital_status === "casado"
+          ? "solteiro"
+          : disciple?.marital_status || "solteiro"
+
       const profilePayload = {
         full_name: fullName.trim(),
         phone: cleanPhone,
@@ -468,13 +545,10 @@ export function DiscipleEditorDialog({
         discipler_id: isRegisteredDiscipler ? disciplerId : null,
         custom_discipler_name: finalCustomDiscipler,
         spouse_id: !isChild && spouseId !== "none" ? spouseId : null,
-        marital_status:
-          !isChild && spouseId !== "none"
-            ? "casado"
-            : disciple?.marital_status || "solteiro",
+        marital_status: nextMaritalStatus,
         father_id: isChild ? (fatherId !== "none" ? fatherId : null) : (fatherId !== "none" ? fatherId : disciple?.father_id || null),
         mother_id: isChild ? (motherId !== "none" ? motherId : null) : (motherId !== "none" ? motherId : disciple?.mother_id || null),
-        email: cleanEmail,
+        email: cleanEmail || null,
         cpf: cleanCPF,
         birth_date: cleanBirth,
         is_baptized: !isChild && isBaptized,
@@ -491,6 +565,7 @@ export function DiscipleEditorDialog({
           .eq("id", disciple.id)
 
         if (updateError) throw updateError
+        profileSaved = true
 
         // Reciprocidade de cônjuge
         if (disciple.spouse_id && disciple.spouse_id !== profilePayload.spouse_id) {
@@ -516,6 +591,7 @@ export function DiscipleEditorDialog({
           .single()
 
         if (insertError) throw insertError
+        profileSaved = true
         savedProfileId = inserted.id
 
         if (profilePayload.spouse_id && savedProfileId) {
@@ -528,6 +604,11 @@ export function DiscipleEditorDialog({
 
       // Sincronizar Companheiros (Fellowships)
       if (savedProfileId && !isChild) {
+        const effectiveFellowships =
+          companionToAdd !== "none" && !selectedFellowships.includes(companionToAdd)
+            ? [...selectedFellowships, companionToAdd]
+            : selectedFellowships
+
         const existingFellowships = fellowships.filter(
           (f) => f.member_a_id === savedProfileId || f.member_b_id === savedProfileId
         )
@@ -535,20 +616,21 @@ export function DiscipleEditorDialog({
         const toDelete = existingFellowships.filter((f) => {
           const otherId =
             f.member_a_id === savedProfileId ? f.member_b_id : f.member_a_id
-          return !selectedFellowships.includes(otherId)
+          return !effectiveFellowships.includes(otherId)
         })
 
         for (const f of toDelete) {
-          await supabase
+          const { error: delErr } = await supabase
             .from("fellowships")
             .delete()
             .match({ member_a_id: f.member_a_id, member_b_id: f.member_b_id })
+          if (delErr) throw delErr
         }
 
         const existingOtherIds = existingFellowships.map((f) =>
           f.member_a_id === savedProfileId ? f.member_b_id : f.member_a_id
         )
-        const toAdd = selectedFellowships.filter(
+        const toAdd = effectiveFellowships.filter(
           (id) => !existingOtherIds.includes(id)
         )
 
@@ -558,9 +640,7 @@ export function DiscipleEditorDialog({
             member_b_id: otherId,
           }))
           const { error: fErr } = await supabase.from("fellowships").insert(insertRows)
-          if (fErr) {
-            console.warn("Aviso ao salvar companheiros:", fErr)
-          }
+          if (fErr) throw fErr
         }
       }
 
@@ -573,8 +653,15 @@ export function DiscipleEditorDialog({
       onOpenChange(false)
     } catch (err: unknown) {
       console.error("Erro ao salvar irmão:", err)
-      const message = err instanceof Error ? err.message : "Erro desconhecido ao salvar."
-      toast.error(`Não foi possível salvar: ${message}`)
+      if (profileSaved) {
+        onSuccess()
+      }
+      const message = extractErrorMessage(err, "Erro desconhecido ao salvar.")
+      toast.error(
+        profileSaved
+          ? `Dados salvos, mas não foi possível atualizar as duplas de oração/serviço: ${message}`
+          : `Não foi possível salvar: ${message}`
+      )
     } finally {
       setSaving(false)
     }
@@ -592,7 +679,7 @@ export function DiscipleEditorDialog({
       onOpenChange(false)
     } catch (err: unknown) {
       console.error("Erro ao excluir perfil:", err)
-      const message = err instanceof Error ? err.message : "Erro desconhecido."
+      const message = extractErrorMessage(err, "Erro desconhecido.")
       toast.error(`Não foi possível excluir: ${message}`)
     } finally {
       setDeleting(false)
@@ -771,6 +858,48 @@ export function DiscipleEditorDialog({
                 />
               </div>
 
+              {/* E-mail (Obrigatório para membros / opcional para crianças) */}
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-xs font-medium text-foreground">
+                  E-mail{" "}
+                  {!isChild ? (
+                    <span className="text-destructive">*</span>
+                  ) : (
+                    <span className="text-muted-foreground font-normal">(Opcional)</span>
+                  )}
+                </Label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    required={!isChild}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="exemplo@email.com"
+                    className="h-11 min-h-[44px] rounded-xl pl-10 text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* WhatsApp / Telefone */}
+              <div className="space-y-1.5">
+                <Label htmlFor="phone" className="text-xs font-medium text-foreground">
+                  WhatsApp / Celular <span className="text-muted-foreground font-normal">(Opcional)</span>
+                </Label>
+                <div className="relative">
+                  <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <Input
+                    id="phone"
+                    value={phone}
+                    onChange={(e) => setPhone(formatPhone(e.target.value))}
+                    placeholder="(31) 99999-9999"
+                    className="h-11 min-h-[44px] rounded-xl pl-10 text-sm"
+                  />
+                </div>
+              </div>
+
               {/* Data de Nascimento */}
               <div className="space-y-1.5">
                 <Label htmlFor="birth_date" className="text-xs font-medium text-foreground">
@@ -829,32 +958,15 @@ export function DiscipleEditorDialog({
                   clearable={false}
                 />
               </div>
-
-              {/* WhatsApp / Telefone */}
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="phone" className="text-xs font-medium text-foreground">
-                  WhatsApp / Celular <span className="text-muted-foreground font-normal">(Opcional)</span>
-                </Label>
-                <div className="relative">
-                  <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="phone"
-                    value={phone}
-                    onChange={(e) => setPhone(formatPhone(e.target.value))}
-                    placeholder="(31) 99999-9999"
-                    className="h-11 min-h-[44px] rounded-xl pl-10 text-sm"
-                  />
-                </div>
-              </div>
             </div>
           </div>
 
-          {/* SEÇÃO 2: Acompanhamento Fraternal & Família */}
+          {/* SEÇÃO 2: Juntas, Acompanhamento & Família */}
           <div className="space-y-4 rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs">
             <div className="flex items-center gap-2 border-b border-border/50 pb-2">
               <HeartHandshake className="h-4 w-4 text-primary" />
               <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground">
-                2. Acompanhamento & Família
+                2. Juntas, Acompanhamento &amp; Família
               </h4>
             </div>
 
@@ -884,16 +996,16 @@ export function DiscipleEditorDialog({
 
                   {/* Alerta de Discipulador Não Encontrado */}
                   {disciplerId === "none" && customDisciplerName.trim() && (
-                    <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-200 animate-in fade-in duration-200">
-                      <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                    <div className={`flex items-start gap-2 rounded-xl border p-3 text-xs ${GRAPH_UI_CLASSES.inspectorWarningBox}`}>
+                      <AlertCircle className={`h-4 w-4 shrink-0 mt-0.5 ${GRAPH_UI_CLASSES.kpiWarningIcon}`} />
                       <div className="flex-1 space-y-0.5">
-                        <p className="font-semibold flex items-center gap-1.5">
+                        <p className="font-semibold flex items-center gap-1.5 flex-wrap">
                           <span>Discipulador não encontrado no sistema</span>
-                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-800 dark:text-amber-300 uppercase">
+                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-bold uppercase">
                             Apenas Nome
                           </span>
                         </p>
-                        <p className="text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
+                        <p className="text-[11px] opacity-90 leading-relaxed">
                           &ldquo;{customDisciplerName}&rdquo; será salvo provisoriamente como texto. O irmão não possui conta cadastrada no sistema.
                         </p>
                       </div>
@@ -913,6 +1025,61 @@ export function DiscipleEditorDialog({
                     placeholder={gender === "M" ? "Buscar esposa..." : "Buscar marido..."}
                     clearable={true}
                   />
+                </div>
+
+                {/* Companheiro(s) de oração e serviço (Juntas horizontais) */}
+                <div className="space-y-2.5 sm:col-span-2 border-t border-border/50 pt-4">
+                  <Label className="text-xs font-medium text-foreground flex flex-wrap items-center justify-between gap-1">
+                    <span>Companheiro(s) de Oração e Serviço</span>
+                    <span className="text-muted-foreground font-normal text-[11px]">(Dupla de evangelismo/oração)</span>
+                  </Label>
+
+                  {selectedFellowships.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedFellowships.map((fid) => {
+                        const companionProfile = allProfiles.find((p) => p.id === fid)
+                        const companionName = companionProfile?.full_name || "Irmão"
+                        return (
+                          <span
+                            key={fid}
+                            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full bg-secondary/80 pl-3.5 pr-1 text-xs font-medium text-secondary-foreground border border-border/50"
+                          >
+                            <span className="truncate max-w-[200px]">{companionName}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCompanion(fid)}
+                              aria-label={`Remover dupla ${companionName}`}
+                              className="flex h-10 w-10 min-h-[40px] min-w-[40px] items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex-1 min-w-0">
+                      <SearchableSelect
+                        options={companionOptions}
+                        value={companionToAdd}
+                        onValueChange={setCompanionToAdd}
+                        placeholder={gender === "M" ? "Buscar companheiro..." : "Buscar companheira..."}
+                        clearable={false}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleAddCompanion}
+                      disabled={companionToAdd === "none"}
+                      className="h-11 min-h-[44px] shrink-0 gap-1.5 rounded-xl px-4 text-xs font-medium"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Adicionar Dupla</span>
+                    </Button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -952,76 +1119,21 @@ export function DiscipleEditorDialog({
             <button
               type="button"
               onClick={() => setShowOptionalFields(!showOptionalFields)}
-              className="flex w-full items-center justify-between p-4 text-xs font-semibold text-muted-foreground hover:bg-muted/40 transition-colors"
+              className="flex min-h-[44px] w-full items-center justify-between p-4 text-left text-xs font-semibold text-muted-foreground hover:bg-muted/40 transition-colors cursor-pointer"
             >
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-primary" />
-                <span>Outras informações opcionais (Companheiros de oração, Batismo, CPF, E-mail)</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <Calendar className="h-4 w-4 text-primary shrink-0" />
+                <span>Outras informações opcionais (Batismo, CPF)</span>
               </div>
               {showOptionalFields ? (
-                <ChevronUp className="h-4 w-4" />
+                <ChevronUp className="h-4 w-4 shrink-0" />
               ) : (
-                <ChevronDown className="h-4 w-4" />
+                <ChevronDown className="h-4 w-4 shrink-0" />
               )}
             </button>
 
             {showOptionalFields && (
               <div className="space-y-4 border-t border-border/70 p-4 sm:p-5">
-                {/* Companheiro(s) de oração e serviço */}
-                {!isChild && (
-                  <div className="space-y-2.5 border-b border-border/60 pb-4">
-                    <Label className="text-xs font-medium text-foreground flex items-center justify-between">
-                      <span>Companheiro(s) de Oração e Serviço</span>
-                      <span className="text-muted-foreground font-normal text-[11px]">(Dupla de evangelismo/oração)</span>
-                    </Label>
-
-                    {selectedFellowships.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {selectedFellowships.map((fid) => {
-                          const companionProfile = allProfiles.find((p) => p.id === fid)
-                          return (
-                            <span
-                              key={fid}
-                              className="inline-flex items-center gap-1.5 rounded-full bg-secondary/80 px-3 py-1 text-xs font-medium text-secondary-foreground border border-border/50"
-                            >
-                              <span>{companionProfile?.full_name || "Irmão"}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveCompanion(fid)}
-                                className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </span>
-                          )
-                        })}
-                      </div>
-                    )}
-
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <div className="flex-1 min-w-0">
-                        <SearchableSelect
-                          options={companionOptions}
-                          value={companionToAdd}
-                          onValueChange={setCompanionToAdd}
-                          placeholder={gender === "M" ? "Buscar companheiro..." : "Buscar companheira..."}
-                          clearable={false}
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleAddCompanion}
-                        disabled={companionToAdd === "none"}
-                        className="h-11 min-h-[44px] shrink-0 gap-1.5 rounded-xl px-4 text-xs font-medium"
-                      >
-                        <Plus className="h-4 w-4" />
-                        <span>Adicionar Dupla</span>
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {!isChild && (
                     <div className="space-y-1.5 sm:col-span-2">
@@ -1078,20 +1190,6 @@ export function DiscipleEditorDialog({
                       value={cpf}
                       onChange={(e) => setCpf(formatCPF(e.target.value))}
                       placeholder="000.000.000-00"
-                      className="h-11 min-h-[44px] rounded-xl text-sm"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="email" className="text-xs font-medium text-foreground">
-                      E-mail <span className="text-muted-foreground font-normal">(Opcional)</span>
-                    </Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="exemplo@email.com"
                       className="h-11 min-h-[44px] rounded-xl text-sm"
                     />
                   </div>

@@ -489,12 +489,13 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         }
       }
 
-      // 2. Busca por Nome
+      // 2. Busca por Nome, E-mail ou Telefone
       if (searchName.trim()) {
-        const term = searchName.toLowerCase()
+        const term = searchName.toLowerCase().trim()
         const matchesName = p.full_name?.toLowerCase().includes(term)
+        const matchesEmail = p.email?.toLowerCase().includes(term)
         const matchesPhone = p.phone?.includes(term)
-        if (!matchesName && !matchesPhone) return false
+        if (!matchesName && !matchesEmail && !matchesPhone) return false
       }
 
       // 3. Filtro por Categoria
@@ -659,7 +660,12 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
       loadData(false)
     } catch (err: unknown) {
       console.error("Erro ao criar setor:", err)
-      const msg = err instanceof Error ? err.message : "Erro desconhecido."
+      const msg =
+        err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string"
+          ? (err as { message: string }).message
+          : err instanceof Error
+          ? err.message
+          : "Erro desconhecido."
       toast.error(`Não foi possível salvar o setor: ${msg}`)
     } finally {
       setSavingSector(false)
@@ -686,6 +692,8 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         <p className="mt-2 text-xs sm:text-sm text-muted-foreground">
           {isUnauthorizedForGroup
             ? "Você não possui permissão para gerenciar este Grupo Caseiro específico ou o grupo informado não existe."
+            : isTier3 && !myHomeGroup
+            ? "Nenhum Grupo Caseiro foi informado no link ou vinculado ao seu perfil."
             : "Sua conta atual não possui permissão de liderança de Grupo Caseiro."}
         </p>
         <div className="mt-6 flex flex-col gap-2 w-full">
@@ -1002,9 +1010,9 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                           </div>
                         )}
 
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span>{currentFocusedGroup.location_text || "Endereço não cadastrado"}</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="min-w-0 break-words">{currentFocusedGroup.location_text || "Endereço não cadastrado"}</span>
                         </div>
                       </div>
                     </div>
@@ -1167,7 +1175,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                   <Input
                     value={searchName}
                     onChange={(e) => setSearchName(e.target.value)}
-                    placeholder="Buscar irmão por nome ou telefone..."
+                    placeholder="Buscar irmão por nome, e-mail ou telefone..."
                     className="h-11 min-h-[44px] rounded-xl pl-10 text-sm"
                   />
                 </div>
