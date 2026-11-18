@@ -66,6 +66,12 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
 // Templates e Disparadores Específicos
 // ============================================================================
 
+export const DEFAULT_SENDERS = {
+  notificacoes: "Igreja em Belo Horizonte <notificacoes@igrejaembh.com.br>",
+  eventos: "Igreja em Belo Horizonte — Eventos <eventos@igrejaembh.com.br>",
+  acolhimento: "Igreja em Belo Horizonte — Acolhimento <acolhimento@igrejaembh.com.br>",
+}
+
 const BASE_CONTAINER_STYLE = `
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   max-width: 580px;
@@ -120,7 +126,7 @@ export async function sendContactNotificationEmail(params: {
   message?: string
   recipientEmail?: string
 }) {
-  const { fullName, phone, region, message, recipientEmail = "onboarding@resend.dev" } = params
+  const { fullName, phone, region, message, recipientEmail = "site.igrejaembh@gmail.com" } = params
 
   const html = `
     <div style="${BASE_CONTAINER_STYLE}">
@@ -146,6 +152,7 @@ export async function sendContactNotificationEmail(params: {
 
   return sendEmail({
     to: recipientEmail,
+    from: DEFAULT_SENDERS.acolhimento,
     subject: `[Acolhimento] Novo contato de ${fullName} (${region})`,
     html,
   })
@@ -161,16 +168,40 @@ export async function sendRegistrationConfirmationEmail(params: {
   eventLocation?: string
   whatsappGroupUrl?: string
   recipientEmail: string
+  customSubject?: string
+  customMessage?: string
 }) {
-  const { participantName, eventTitle, eventDate, eventLocation, whatsappGroupUrl, recipientEmail } = params
+  const {
+    participantName,
+    eventTitle,
+    eventDate,
+    eventLocation,
+    whatsappGroupUrl,
+    recipientEmail,
+    customSubject,
+    customMessage,
+  } = params
 
-  const html = `
-    <div style="${BASE_CONTAINER_STYLE}">
-      <div style="${HEADER_STYLE}">
-        <h2 style="margin: 0; font-size: 20px; font-weight: 600;">Inscrição Confirmada!</h2>
-        <p style="margin: 6px 0 0; font-size: 14px; opacity: 0.85;">${eventTitle}</p>
-      </div>
-      <div style="${BODY_STYLE}">
+  const replaceVars = (text: string) => {
+    return text
+      .replace(/{nome}/gi, participantName)
+      .replace(/{evento}/gi, eventTitle)
+      .replace(/{data}/gi, eventDate || "A definir")
+      .replace(/{local}/gi, eventLocation || "A definir")
+      .replace(/{whatsapp}/gi, whatsappGroupUrl || "")
+      .replace(/{link_whatsapp}/gi, whatsappGroupUrl || "")
+  }
+
+  const subject = customSubject
+    ? replaceVars(customSubject)
+    : `Confirmação de Inscrição: ${eventTitle}`
+
+  const formattedBody = customMessage
+    ? replaceVars(customMessage)
+        .split("\n\n")
+        .map((paragraph) => `<p style="margin: 0 0 14px 0;">${paragraph.replace(/\n/g, "<br/>")}</p>`)
+        .join("")
+    : `
         <p>Graça e paz, <strong>${participantName}</strong>!</p>
         <p>Sua inscrição para o <strong>${eventTitle}</strong> está confirmada. Cremos que será um tempo precioso de edificação mútua e fortalecimento no Senhor.</p>
         
@@ -179,6 +210,16 @@ export async function sendRegistrationConfirmationEmail(params: {
           ${eventDate ? `<p style="margin: 4px 0;">📅 <strong>Data:</strong> ${eventDate}</p>` : ""}
           ${eventLocation ? `<p style="margin: 4px 0;">📍 <strong>Local:</strong> ${eventLocation}</p>` : ""}
         </div>
+      `
+
+  const html = `
+    <div style="${BASE_CONTAINER_STYLE}">
+      <div style="${HEADER_STYLE}">
+        <h2 style="margin: 0; font-size: 20px; font-weight: 600;">Inscrição Confirmada!</h2>
+        <p style="margin: 6px 0 0; font-size: 14px; opacity: 0.85;">${eventTitle}</p>
+      </div>
+      <div style="${BODY_STYLE}">
+        ${formattedBody}
 
         ${
           whatsappGroupUrl
@@ -205,7 +246,8 @@ export async function sendRegistrationConfirmationEmail(params: {
 
   return sendEmail({
     to: recipientEmail,
-    subject: `Confirmação de Inscrição: ${eventTitle}`,
+    from: DEFAULT_SENDERS.eventos,
+    subject,
     html,
   })
 }
@@ -242,6 +284,7 @@ export async function sendWaitlistConfirmationEmail(params: {
 
   return sendEmail({
     to: recipientEmail,
+    from: DEFAULT_SENDERS.eventos,
     subject: `Lista de Espera: ${eventTitle}`,
     html,
   })
@@ -255,8 +298,28 @@ export async function sendWaitlistCallEmail(params: {
   eventTitle: string
   registrationUrl: string
   recipientEmail: string
+  customSubject?: string
+  customMessage?: string
 }) {
-  const { participantName, eventTitle, registrationUrl, recipientEmail } = params
+  const {
+    participantName,
+    eventTitle,
+    registrationUrl,
+    recipientEmail,
+    customSubject,
+    customMessage,
+  } = params
+
+  const formattedMessage = customMessage
+    ? customMessage
+        .split("\n\n")
+        .map((paragraph) => `<p style="margin: 0 0 14px 0;">${paragraph.replace(/\n/g, "<br/>")}</p>`)
+        .join("")
+    : `
+        <p>Graça e paz, <strong>${participantName}</strong>!</p>
+        <p>Uma vaga acabou de ser aberta para você no <strong>${eventTitle}</strong>.</p>
+        <p>Para garantir seu lugar, por favor acesse o link exclusivo abaixo e conclua sua inscrição o quanto antes:</p>
+      `
 
   const html = `
     <div style="${BASE_CONTAINER_STYLE}">
@@ -265,9 +328,7 @@ export async function sendWaitlistCallEmail(params: {
         <p style="margin: 6px 0 0; font-size: 14px; opacity: 0.85;">${eventTitle}</p>
       </div>
       <div style="${BODY_STYLE}">
-        <p>Graça e paz, <strong>${participantName}</strong>!</p>
-        <p>Uma vaga acabou de ser aberta para você no <strong>${eventTitle}</strong>.</p>
-        <p>Para garantir seu lugar, por favor acesse o link exclusivo abaixo e conclua sua inscrição o quanto antes:</p>
+        ${formattedMessage}
         
         <div style="text-align: center; margin: 24px 0;">
           <a href="${registrationUrl}" target="_blank" style="${BUTTON_STYLE}">
@@ -287,7 +348,8 @@ export async function sendWaitlistCallEmail(params: {
 
   return sendEmail({
     to: recipientEmail,
-    subject: `Vaga Liberada: ${eventTitle}`,
+    from: DEFAULT_SENDERS.eventos,
+    subject: customSubject || `Vaga Liberada: ${eventTitle}`,
     html,
   })
 }

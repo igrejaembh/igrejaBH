@@ -6,6 +6,8 @@ import {
   isValidCPF,
   isValidPhone,
   fetchAddressFromCep,
+  getEventFormInputWarnings,
+  DEFAULT_EVENT_FORM_FIELDS,
 } from "@/lib/forms"
 import type { FormField, FormTemplate, FormSubmission } from "@/lib/forms"
 import {
@@ -299,6 +301,33 @@ export default function FormBuilder() {
     setPreviewFormErrors({})
     setPostAnnouncement(false)
     setAnnouncementText("")
+  }
+
+  // Criar formulário pré-configurado especificamente para eventos e retiros
+  const handleCreateEventForm = () => {
+    const newForm: FormTemplate = {
+      id: generateFormId(),
+      name: "Ficha de Inscrição — Evento",
+      description:
+        "Ficha oficial com dados cadastrais e de contato necessários para eventos e retiros.",
+      createdAt: new Date().toISOString(),
+      isPublic: true,
+      isActive: true,
+      fields: DEFAULT_EVENT_FORM_FIELDS.map((f) => ({
+        ...f,
+        id: generateFieldId(),
+      })),
+    }
+
+    setSelectedForm(newForm)
+    setEditingFieldId(newForm.fields[0].id)
+    setCurrentView("builder")
+    setBuilderTab("edit")
+    setPreviewFormData({})
+    setPreviewFormErrors({})
+    setPostAnnouncement(false)
+    setAnnouncementText("")
+    toast.success("Modelo padrão de evento carregado com sucesso!")
   }
 
   // Edit existing form
@@ -1107,6 +1136,15 @@ export default function FormBuilder() {
               </Button>
 
               <Button
+                onClick={handleCreateEventForm}
+                variant="outline"
+                className="h-11 w-full cursor-pointer rounded-md border-primary/40 text-primary hover:bg-primary/10 font-semibold active:scale-95 sm:w-auto"
+              >
+                <Calendar className="mr-2 h-4 w-4" />
+                Modelo para Eventos
+              </Button>
+
+              <Button
                 onClick={handleCreateNewForm}
                 className="h-11 w-full cursor-pointer rounded-md bg-primary px-5 font-bold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-95 sm:w-auto"
               >
@@ -1155,9 +1193,16 @@ export default function FormBuilder() {
                   zero.
                 </p>
               </div>
-              <Button onClick={handleCreateNewForm} className="mt-4">
-                Criar Primeiro Formulário
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                <Button onClick={handleCreateEventForm} variant="outline" className="border-primary/50 text-primary hover:bg-primary/10">
+                  <Calendar className="mr-2 h-4 w-4" />
+                  Modelo para Eventos
+                </Button>
+                <Button onClick={handleCreateNewForm}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Criar Formulário em Branco
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -1604,6 +1649,85 @@ export default function FormBuilder() {
                   .
                 </p>
               </div>
+
+              {/* Alerta inteligente para formulários de eventos sem campos com restrição de E-mail ou Telefone */}
+              {(() => {
+                const eventWarnings = getEventFormInputWarnings(
+                  selectedForm.fields,
+                  isFormConnectedToEvent
+                )
+                if (eventWarnings.length === 0) return null
+
+                return (
+                  <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs space-y-2.5 dark:bg-amber-950/20 animate-in fade-in duration-300">
+                    <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-400">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <span>Atenção: Formulário Vinculado a Evento / Retiro</span>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300 text-[11px] leading-relaxed">
+                      {eventWarnings.map((warn, i) => (
+                        <li key={i}>{warn}</li>
+                      ))}
+                    </ul>
+                    <div className="pt-1 flex flex-wrap gap-2">
+                      {!selectedForm.fields.some((f) => f.validationPreset === "email" || (f.type as string) === "email") && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const newField: FormField = {
+                              id: generateFieldId(),
+                              type: "text",
+                              label: "E-mail",
+                              placeholder: "exemplo@email.com",
+                              required: true,
+                              helpText: "Para envio de confirmação e orientações",
+                              validationPreset: "email",
+                              options: [],
+                              halfWidth: true,
+                            }
+                            setSelectedForm((prev) =>
+                              prev ? { ...prev, fields: [...prev.fields, newField] } : null
+                            )
+                            toast.success("Campo com validação de E-mail adicionado!")
+                          }}
+                          className="h-8 text-[11px] font-semibold border-amber-500/30 text-amber-900 dark:text-amber-300 hover:bg-amber-500/20 cursor-pointer"
+                        >
+                          + Adicionar Campo de E-mail
+                        </Button>
+                      )}
+                      {!selectedForm.fields.some((f) => f.validationPreset === "phone") && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const newField: FormField = {
+                              id: generateFieldId(),
+                              type: "text",
+                              label: "Telefone / WhatsApp",
+                              placeholder: "(31) 99999-9999",
+                              required: true,
+                              helpText: "Contato oficial para avisos e convites",
+                              validationPreset: "phone",
+                              options: [],
+                              halfWidth: true,
+                            }
+                            setSelectedForm((prev) =>
+                              prev ? { ...prev, fields: [...prev.fields, newField] } : null
+                            )
+                            toast.success("Campo com validação de Telefone adicionado!")
+                          }}
+                          className="h-8 text-[11px] font-semibold border-amber-500/30 text-amber-900 dark:text-amber-300 hover:bg-amber-500/20 cursor-pointer"
+                        >
+                          + Adicionar Campo de Telefone
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Fields List (Canvas) */}
               <div className="space-y-4">

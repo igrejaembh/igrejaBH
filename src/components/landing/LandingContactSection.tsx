@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Field, FieldLabel, FieldError } from "@/components/ui/field"
+import { sendContactNotificationEmail } from "@/services/emailService"
 
 const quickContactSchema = z.object({
   fullName: z.string().min(3, "Por favor, informe seu nome completo"),
@@ -86,6 +87,16 @@ export function LandingContactSection() {
       if (error) {
         console.warn("Aviso na inserção de contato:", error.message)
       }
+
+      // Notificação por e-mail para a equipe de acolhimento (não bloqueante)
+      void sendContactNotificationEmail({
+        fullName: values.fullName.trim(),
+        phone: values.phone.trim(),
+        region: values.region,
+        message: values.message?.trim(),
+      }).catch((emailErr) =>
+        console.warn("Aviso ao enviar notificação de contato por e-mail:", emailErr)
+      )
 
       setSubmitted(true)
       toast.success("Recebemos sua mensagem com alegria!", {

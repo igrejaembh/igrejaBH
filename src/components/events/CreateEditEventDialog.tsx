@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Loader2, AlertTriangle, Info } from "lucide-react";
+import { Loader2, AlertTriangle, Info, Mail } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
 import { ensureMandatoryEventFields, type FormField } from "@/lib/forms";
@@ -47,6 +47,20 @@ import {
 
 type Retreat = Database["public"]["Tables"]["retreats"]["Row"];
 
+export const DEFAULT_CONFIRMATION_EMAIL_SUBJECT = "Confirmação de Inscrição: {evento}";
+
+export const DEFAULT_CONFIRMATION_EMAIL_BODY = `Graça e paz, {nome}!
+
+Sua inscrição para o {evento} está confirmada. Cremos que será um tempo precioso de edificação mútua e fortalecimento no Senhor.
+
+Detalhes do Encontro:
+📅 Data: {data}
+📍 Local: {local}
+
+Orientações:
+- Leve sua Bíblia, caderno de anotações e itens de uso pessoal.
+- Chegue com antecedência para o credenciamento e acolhimento.`;
+
 const retreatFormSchema = z.object({
   title: z.string().min(3, { message: "O título deve ter pelo menos 3 caracteres." }),
   description: z.string().default(""),
@@ -75,6 +89,10 @@ const retreatFormSchema = z.object({
       })
     )
     .default(DEFAULT_CHECKIN_CHECKLIST),
+  whatsapp_group_url: z.string().optional().nullable(),
+  send_confirmation_email: z.boolean().default(true),
+  custom_confirmation_subject: z.string().optional().nullable(),
+  custom_confirmation_body: z.string().optional().nullable(),
 });
 
 type RetreatFormValues = z.infer<typeof retreatFormSchema>;
@@ -124,6 +142,10 @@ export function CreateEditEventDialog({
       form_id: "",
       registration_deadline: "",
       checkin_checklist_config: [...DEFAULT_CHECKIN_CHECKLIST],
+      whatsapp_group_url: "",
+      send_confirmation_email: true,
+      custom_confirmation_subject: DEFAULT_CONFIRMATION_EMAIL_SUBJECT,
+      custom_confirmation_body: DEFAULT_CONFIRMATION_EMAIL_BODY,
     },
   });
 
@@ -136,6 +158,7 @@ export function CreateEditEventDialog({
   const isViewingAutoClosed = Boolean(
     retreat && isRetreatAutoClosed(retreat.status, watchedEndDate || retreat.end_date)
   );
+  const sendEmailEnabled = watch("send_confirmation_email");
 
   useEffect(() => {
     if (!isAttemptingActivePastRetreat) {
@@ -214,6 +237,18 @@ export function CreateEditEventDialog({
       if (isOpen) {
         loadBatches(retreat.id);
       }
+
+      const spreadsheet = (retreat.spreadsheet_data as Record<string, any>) || {};
+      setValue("whatsapp_group_url", spreadsheet.whatsapp_group_url || "");
+      setValue("send_confirmation_email", spreadsheet.send_confirmation_email ?? true);
+      setValue(
+        "custom_confirmation_subject",
+        spreadsheet.custom_confirmation_subject || DEFAULT_CONFIRMATION_EMAIL_SUBJECT
+      );
+      setValue(
+        "custom_confirmation_body",
+        spreadsheet.custom_confirmation_body || DEFAULT_CONFIRMATION_EMAIL_BODY
+      );
     } else {
       reset({
         title: "",
@@ -228,6 +263,10 @@ export function CreateEditEventDialog({
         form_id: "",
         registration_deadline: "",
         checkin_checklist_config: [...DEFAULT_CHECKIN_CHECKLIST],
+        whatsapp_group_url: "",
+        send_confirmation_email: true,
+        custom_confirmation_subject: DEFAULT_CONFIRMATION_EMAIL_SUBJECT,
+        custom_confirmation_body: DEFAULT_CONFIRMATION_EMAIL_BODY,
       });
       setOriginalBatches([]);
       setBatchDrafts([]);
@@ -266,7 +305,6 @@ export function CreateEditEventDialog({
     }
 
     setSubmitting(true);
-
     if (batchDrafts.length > 0) {
       const normalized = batchDrafts.map((b) => ({
         ...b,
@@ -284,6 +322,7 @@ export function CreateEditEventDialog({
     setBatchFieldErrors({});
     setBatchValidationErrors([]);
 
+    const existingSpreadsheet = (retreat?.spreadsheet_data as Record<string, any>) || {};
     const payload = {
       title: data.title,
       description: data.description || null,
@@ -298,6 +337,13 @@ export function CreateEditEventDialog({
       registration_deadline:
         data.registration_deadline === "" ? null : data.registration_deadline,
       checkin_checklist_config: data.checkin_checklist_config as unknown as Json,
+      spreadsheet_data: {
+        ...existingSpreadsheet,
+        whatsapp_group_url: data.whatsapp_group_url?.trim() || null,
+        send_confirmation_email: data.send_confirmation_email ?? true,
+        custom_confirmation_subject: data.custom_confirmation_subject?.trim() || null,
+        custom_confirmation_body: data.custom_confirmation_body?.trim() || null,
+      },
     };
 
     // Validação preventiva: exclusividade 1-para-1 de formulário por evento
@@ -725,6 +771,131 @@ export function CreateEditEventDialog({
               />
             )}
           />
+
+          {/* Seção de Comunicação e E-mail de Confirmação */}
+          <div className="rounded-xl border border-border/80 bg-muted/20 p-4 space-y-4">
+            <div className="flex items-center gap-2 border-b border-border/40 pb-2">
+              <Mail className="h-5 w-5 text-primary" />
+              <div>
+                <h4 className="text-sm font-bold text-foreground">
+                  Comunicação & E-mail de Confirmação
+                </h4>
+                <p className="text-[11px] text-muted-foreground">
+                  Configure o grupo oficial de WhatsApp e o e-mail de confirmação enviado aos participantes.
+                </p>
+              </div>
+            </div>
+
+            <Field>
+              <FieldLabel htmlFor="whatsapp_group_url">Link do Grupo Oficial de WhatsApp</FieldLabel>
+              <Controller
+                name="whatsapp_group_url"
+                control={control}
+                render={({ field }) => (
+                  <>
+                    <Input
+                      {...field}
+                      value={field.value || ""}
+                      id="whatsapp_group_url"
+                      placeholder="https://chat.whatsapp.com/..."
+                      className="rounded-md min-h-[44px]"
+                    />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Se informado, um botão oficial para entrar no grupo de WhatsApp será exibido no e-mail de confirmação.
+                    </p>
+                  </>
+                )}
+              />
+            </Field>
+
+            <Field>
+              <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border/60 bg-background">
+                <div className="space-y-0.5">
+                  <span className="text-xs font-semibold text-foreground">
+                    Enviar e-mail de confirmação de inscrição aos participantes
+                  </span>
+                  <p className="text-[11px] text-muted-foreground">
+                    Dispara automaticamente o e-mail assim que a ficha for enviada (caso haja campo de e-mail).
+                  </p>
+                </div>
+                <Controller
+                  name="send_confirmation_email"
+                  control={control}
+                  render={({ field }) => (
+                    <input
+                      type="checkbox"
+                      id="send_confirmation_email"
+                      checked={field.value}
+                      onChange={(e) => field.onChange(e.target.checked)}
+                      className="h-5 w-5 rounded border-zinc-300 text-primary focus:ring-primary cursor-pointer"
+                    />
+                  )}
+                />
+              </div>
+            </Field>
+
+            {sendEmailEnabled && (
+              <div className="space-y-3 pt-1 border-t border-border/40">
+                <Field>
+                  <FieldLabel htmlFor="custom_confirmation_subject">
+                    Assunto do E-mail de Confirmação
+                  </FieldLabel>
+                  <Controller
+                    name="custom_confirmation_subject"
+                    control={control}
+                    render={({ field }) => (
+                      <Input
+                        {...field}
+                        value={field.value ?? ""}
+                        id="custom_confirmation_subject"
+                        className="rounded-md min-h-[44px]"
+                      />
+                    )}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Tag disponível: <code className="bg-muted px-1 rounded">{"{evento}"}</code> (substituída pelo nome deste evento).
+                  </p>
+                </Field>
+
+                <Field>
+                  <div className="flex items-center justify-between mb-1">
+                    <FieldLabel htmlFor="custom_confirmation_body">
+                      Mensagem / Orientações do E-mail
+                    </FieldLabel>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setValue("custom_confirmation_subject", DEFAULT_CONFIRMATION_EMAIL_SUBJECT);
+                        setValue("custom_confirmation_body", DEFAULT_CONFIRMATION_EMAIL_BODY);
+                        toast.info("Modelo padrão restaurado!");
+                      }}
+                      className="text-[11px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+                    >
+                      Restaurar texto padrão
+                    </button>
+                  </div>
+                  <Controller
+                    name="custom_confirmation_body"
+                    control={control}
+                    render={({ field }) => (
+                      <>
+                        <Textarea
+                          {...field}
+                          value={field.value ?? ""}
+                          id="custom_confirmation_body"
+                          rows={6}
+                          className="rounded-md text-xs leading-relaxed bg-background"
+                        />
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Tags dinâmicas: <code className="bg-muted px-1 rounded">{"{nome}"}</code>, <code className="bg-muted px-1 rounded">{"{evento}"}</code>, <code className="bg-muted px-1 rounded">{"{data}"}</code>, <code className="bg-muted px-1 rounded">{"{local}"}</code>. O texto acima já vem preenchido como modelo e pode ser editado livremente.
+                        </p>
+                      </>
+                    )}
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
 
           <DialogFooter className="pt-4 flex flex-col sm:flex-row gap-2">
             <Button

@@ -297,7 +297,7 @@ export function calculateTotalPrice(
 }
 
 /**
- * Define the 6 mandatory baseline fields that must exist in every event registration form.
+ * Define the mandatory baseline fields that must exist in every event registration form.
  */
 export const MANDATORY_EVENT_FIELDS: FormField[] = [
   {
@@ -306,9 +306,20 @@ export const MANDATORY_EVENT_FIELDS: FormField[] = [
     label: "Nome Completo",
     placeholder: "Digite seu nome completo",
     required: true,
-    helpText: "Nome do participante inscritos",
+    helpText: "Nome do participante",
     options: [],
     halfWidth: false
+  },
+  {
+    id: "mandatory_cpf",
+    type: "text",
+    label: "CPF",
+    placeholder: "000.000.000-00",
+    required: true,
+    helpText: "Para identificação e controle de inscrições",
+    validationPreset: "cpf",
+    options: [],
+    halfWidth: true
   },
   {
     id: "mandatory_email",
@@ -316,7 +327,7 @@ export const MANDATORY_EVENT_FIELDS: FormField[] = [
     label: "E-mail",
     placeholder: "exemplo@email.com",
     required: true,
-    helpText: "E-mail para envio da confirmação",
+    helpText: "E-mail para envio da confirmação e orientações",
     validationPreset: "email",
     options: [],
     halfWidth: true
@@ -327,7 +338,7 @@ export const MANDATORY_EVENT_FIELDS: FormField[] = [
     label: "Telefone / WhatsApp",
     placeholder: "(31) 99999-9999",
     required: true,
-    helpText: "Telefone de contato com DDD",
+    helpText: "Telefone com DDD para comunicados e WhatsApp",
     validationPreset: "phone",
     options: [],
     halfWidth: true
@@ -338,7 +349,7 @@ export const MANDATORY_EVENT_FIELDS: FormField[] = [
     label: "Sexo / Gênero",
     placeholder: "Selecione o sexo",
     required: true,
-    helpText: "Utilizado para alocação de quartos",
+    helpText: "Utilizado para alocação de quartos e alojamentos",
     options: ["Masculino", "Feminino"],
     halfWidth: true
   },
@@ -364,31 +375,77 @@ export const MANDATORY_EVENT_FIELDS: FormField[] = [
   }
 ]
 
+export const DEFAULT_EVENT_FORM_FIELDS = MANDATORY_EVENT_FIELDS
+
 /**
  * Checks if a given field list contains a match for a mandatory requirement based on label or preset.
  */
 export function matchesMandatoryRequirement(field: FormField, req: FormField): boolean {
-  const fLabel = field.label.toLowerCase()
-
-  if (req.id === "mandatory_full_name") {
-    return fLabel.includes("nome") || fLabel.includes("participante")
+  if (req.id === "mandatory_cpf") {
+    return field.validationPreset === "cpf" || field.label.toLowerCase().includes("cpf")
   }
   if (req.id === "mandatory_email") {
-    return field.validationPreset === "email" || fLabel.includes("email") || fLabel.includes("e-mail")
+    return field.validationPreset === "email" || (field.type as string) === "email"
   }
   if (req.id === "mandatory_phone") {
-    return field.validationPreset === "phone" || fLabel.includes("telefone") || fLabel.includes("whatsapp") || fLabel.includes("celular")
+    return field.validationPreset === "phone"
   }
   if (req.id === "mandatory_gender") {
-    return fLabel.includes("gênero") || fLabel.includes("genero") || fLabel.includes("sexo")
+    const fLabel = field.label.toLowerCase()
+    const hasGenderOptions =
+      field.options &&
+      field.options.some((o) => o.toLowerCase().startsWith("masc")) &&
+      field.options.some((o) => o.toLowerCase().startsWith("fem"))
+    return Boolean(hasGenderOptions) || fLabel.includes("sexo") || fLabel.includes("gênero") || fLabel.includes("genero")
+  }
+  if (req.id === "mandatory_full_name") {
+    const fLabel = field.label.toLowerCase()
+    return fLabel.includes("nome") || fLabel.includes("participante")
   }
   if (req.id === "mandatory_city_state") {
+    const fLabel = field.label.toLowerCase()
     return fLabel.includes("cidade") || fLabel.includes("estado") || fLabel.includes("município")
   }
   if (req.id === "mandatory_birth_date") {
-    return fLabel.includes("nascimento") || fLabel.includes("idade") || fLabel.includes("data de nasci") || field.type === "date"
+    const fLabel = field.label.toLowerCase()
+    return fLabel.includes("nascimento") || fLabel.includes("idade") || field.type === "date"
   }
   return false
+}
+
+/**
+ * Verifica formulários vinculados a eventos para alertar sobre ausência de campos de comunicação.
+ * A verificação é realizada EXCLUSIVAMENTE pelo tipo de restrição do campo (validationPreset),
+ * e NÃO pelo nome/rótulo do campo, que pode variar livremente.
+ */
+export function getEventFormInputWarnings(
+  fields: FormField[],
+  isEventConnected: boolean
+): string[] {
+  if (!isEventConnected) return []
+
+  const hasEmailInput = fields.some(
+    (f) => f.validationPreset === "email" || (f.type as string) === "email"
+  )
+  const hasPhoneInput = fields.some(
+    (f) => f.validationPreset === "phone"
+  )
+
+  const warnings: string[] = []
+
+  if (!hasEmailInput) {
+    warnings.push(
+      "Ausência de campo com validação de E-mail: Não será possível o envio automático de e-mails de confirmação e comunicados aos participantes deste evento."
+    )
+  }
+
+  if (!hasPhoneInput) {
+    warnings.push(
+      "Ausência de campo com validação de Telefone: Não será possível o contato direto nem o envio de convites de lista de espera via WhatsApp."
+    )
+  }
+
+  return warnings
 }
 
 /**

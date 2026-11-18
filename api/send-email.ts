@@ -31,8 +31,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const resendApiKey = process.env.RESEND_API_KEY || ""
-    const defaultFrom = process.env.RESEND_FROM_EMAIL || "Igreja em Belo Horizonte <onboarding@resend.dev>"
+    const resendApiKey = process.env.RESEND_API_KEY
+    const defaultFrom = process.env.RESEND_FROM_EMAIL || "Igreja em Belo Horizonte <notificacoes@igrejaembh.com.br>"
 
     if (!resendApiKey) {
       return res.status(500).json({ error: "RESEND_API_KEY não configurada no ambiente." })
