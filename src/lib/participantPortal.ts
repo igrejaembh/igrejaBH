@@ -35,6 +35,7 @@ export interface PortalRegistrationInfo {
   retreat_id: string | null
   profile_id: string | null
   portal_token: string
+  qr_token: string | null
   status: "confirmado" | "presente" | "cancelado"
   paid: boolean
   payment_method: string | null

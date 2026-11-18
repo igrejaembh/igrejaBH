@@ -61,6 +61,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ParticipantPortalFlightForm } from "@/components/events/ParticipantPortalFlightForm"
 import { ParticipantPortalCancelDialog } from "@/components/events/ParticipantPortalCancelDialog"
+import { ParticipantQrBadge } from "@/components/events/ParticipantQrBadge"
+import type { Database } from "@/lib/database.types"
 
 const GUEST_FIELD_LABELS: Record<string, string> = {
   full_name: "Nome Completo",
@@ -92,6 +94,7 @@ function normalizePortalPayload(raw: unknown): ParticipantPortalData {
       retreat_id: (regRaw.retreat_id as string | null) ?? null,
       profile_id: (regRaw.profile_id as string | null) ?? null,
       portal_token: String(regRaw.portal_token || ""),
+      qr_token: (regRaw.qr_token as string | null) ?? null,
       status:
         (regRaw.status as "confirmado" | "presente" | "cancelado") ||
         "confirmado",
@@ -765,8 +768,22 @@ export default function ParticipantPortal() {
           />
         </div>
 
-        {/* Coluna Lateral / Mensagens e Cancelamento */}
+        {/* Coluna Lateral / Crachá Digital, Mensagens e Cancelamento */}
         <div className="flex min-w-0 flex-col gap-6 lg:col-span-5">
+          {/* 3.5 Crachá Digital (QR Code) */}
+          {!isCancelled && (
+            <ParticipantQrBadge
+              registration={{
+                ...(registration as unknown as Database["public"]["Tables"]["registrations"]["Row"]),
+                qr_token: registration.qr_token || registration.id,
+                retreats: retreat
+                  ? (retreat as unknown as Database["public"]["Tables"]["retreats"]["Row"])
+                  : null,
+              }}
+              participantName={registration.participant_name}
+            />
+          )}
+
           {/* 4. Mensagens aos Organizadores */}
           <Card className={THEME_CLASSES.card}>
             <CardHeader className="border-b border-border/60">
