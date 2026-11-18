@@ -1,22 +1,29 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
+    "design-taste-frontend": {
+      "source": "Leonxlnx/taste-skill",
+      "commit": "f6b76575f949707b4e3c37cd86cb44b0b98643e8",
+      "sourceType": "github",
+      "skillPath": "skills/taste-skill/SKILL.md",
+      "computedHash": "b10eab0a9684cd09cf34c31ef04a3bf530a5f4404422f9c520d42372d670c7fc"
+    },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",
-      "computedHash": "1d61d915437a447176ad9f1d7141f22b163265e64f9fac50267264674068099f"
+      "computedHash": "900cb72c5077f504b960362f1117366b671f71fed46396330efd2623767fee64"
     },
     "supabase": {
       "source": "supabase/agent-skills",
       "sourceType": "github",
       "skillPath": "skills/supabase/SKILL.md",
-      "computedHash": "61638e85394d2e39d1109cbf607593afb9733e0de19cdf0b52ec9bc32d95ea74"
+      "computedHash": "dbafa5295b215b51f9f84853fc4c3f8ced9b12b25348c1ae8c2817f895dec578"
     },
     "supabase-postgres-best-practices": {
       "source": "supabase/agent-skills",
       "sourceType": "github",
       "skillPath": "skills/supabase-postgres-best-practices/SKILL.md",
-      "computedHash": "3639bed1f40b3fbadae79fee631c42c89b2d1f5c30b05d5aa3cca06422a6bbbc"
+      "computedHash": "96c838e76a0b174dd3acce84804d0bbe85832b0dc2ad1d6da6c292e8385f8bbd"
     }
   }
 }

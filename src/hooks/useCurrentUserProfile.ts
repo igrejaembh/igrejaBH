@@ -97,12 +97,21 @@ function updateState(partial: Partial<ProfileCacheState>) {
   emitChange()
 }
 
-// Global in-flight deduplication promise
+// Global in-flight deduplication promise & generation counter to prevent stale overwrites
 let activeFetchPromise: Promise<ProfileCacheState | null> | null = null
+let fetchGeneration = 0
 
 export async function fetchUserProfile(forceRefresh = false): Promise<ProfileCacheState | null> {
   if (activeFetchPromise && !forceRefresh) {
     return activeFetchPromise
+  }
+
+  const gen = ++fetchGeneration
+
+  // Mark loading before async work when no user/profile is cached yet so ProtectedRoute
+  // waits for the fetch instead of prematurely redirecting back to /entrar.
+  if (!currentState.user && !currentState.profile && !currentState.loading) {
+    updateState({ loading: true })
   }
 
   activeFetchPromise = (async () => {
@@ -110,6 +119,10 @@ export async function fetchUserProfile(forceRefresh = false): Promise<ProfileCac
       const {
         data: { session },
       } = await supabase.auth.getSession()
+
+      if (gen !== fetchGeneration) {
+        return currentState
+      }
 
       if (!session?.user) {
         updateState({
@@ -135,6 +148,10 @@ export async function fetchUserProfile(forceRefresh = false): Promise<ProfileCac
         .eq("user_id", userId)
         .maybeSingle()
 
+      if (gen !== fetchGeneration) {
+        return currentState
+      }
+
       if (profileErr) {
         console.error("Erro ao buscar perfil:", profileErr)
       }
@@ -157,6 +174,10 @@ export async function fetchUserProfile(forceRefresh = false): Promise<ProfileCac
         .from("home_groups")
         .select("*", { count: "exact", head: true })
         .or(`leader_1_id.eq.${profileData.id},leader_2_id.eq.${profileData.id}`)
+
+      if (gen !== fetchGeneration) {
+        return currentState
+      }
 
       const isLeader = (count || 0) > 0
       const admin = !!(profileData.is_dev || profileData.is_presbyter)
@@ -198,10 +219,14 @@ export async function fetchUserProfile(forceRefresh = false): Promise<ProfileCac
       return currentState
     } catch (err) {
       console.error("Erro inesperado ao carregar dados do usuário:", err)
-      updateState({ loading: false })
+      if (gen === fetchGeneration) {
+        updateState({ loading: false })
+      }
       return currentState
     } finally {
-      activeFetchPromise = null
+      if (gen === fetchGeneration) {
+        activeFetchPromise = null
+      }
     }
   })()
 

@@ -36,8 +36,8 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const resendApiKey = Deno.env.get("RESEND_API_KEY") || ""
-    const defaultFrom = Deno.env.get("RESEND_FROM_EMAIL") || "Igreja em Belo Horizonte <onboarding@resend.dev>"
+    const resendApiKey = Deno.env.get("RESEND_API_KEY")
+    const defaultFrom = Deno.env.get("RESEND_FROM_EMAIL") || "Igreja em Belo Horizonte <notificacoes@igrejaembh.com.br>"
 
     if (!resendApiKey) {
       return new Response(

@@ -69,6 +69,8 @@ import {
 } from "@/lib/retreatBatches"
 import { BATCH_STATUS_CONFIG } from "@/constants/colors"
 import { generatePortalToken } from "@/lib/participantPortal"
+import { formatDateBR } from "@/lib/dateUtils"
+import { sendRegistrationConfirmationEmail } from "@/services/emailService"
 import type { User } from "@supabase/supabase-js"
 import type { Json } from "@/lib/database.types"
 
@@ -472,7 +474,7 @@ export default function FormResponder() {
           // Check associated retreat for status, capacity and expiration date
           const { data: associatedRetreats, error: retreatError } = await supabase
             .from("retreats")
-            .select("id, title, status, start_date, end_date, max_participants, registration_deadline, price, has_payment, location_text, description, image_url")
+            .select("id, title, status, start_date, end_date, max_participants, registration_deadline, price, has_payment, location_text, description, image_url, spreadsheet_data")
             .eq("form_id", dbForm.id)
 
           if (retreatError) throw retreatError
@@ -593,7 +595,7 @@ export default function FormResponder() {
             if (directRetreatId) {
               const { data: directRetreat } = await supabase
                 .from("retreats")
-                .select("id, title, status, start_date, end_date, max_participants, registration_deadline, price, has_payment, location_text, description, image_url")
+                .select("id, title, status, start_date, end_date, max_participants, registration_deadline, price, has_payment, location_text, description, image_url, spreadsheet_data")
                 .eq("id", directRetreatId)
                 .maybeSingle()
               if (directRetreat) {
@@ -1312,6 +1314,33 @@ export default function FormResponder() {
           if (regError) throw regError
           createdPortalToken = portalToken
 
+          // Disparo de e-mail de confirmação de inscrição (não bloqueante)
+          const targetEmail = guestData.email || emailVal
+          const targetName = guestData.full_name || nameVal
+
+          const retreatSettings =
+            (associatedRetreat?.spreadsheet_data as Record<string, any>) || {}
+          const isEmailEnabled = retreatSettings.send_confirmation_email !== false
+
+          if (targetEmail && associatedRetreat && isEmailEnabled) {
+            const dateFormatted = associatedRetreat.start_date
+              ? associatedRetreat.end_date
+                ? `${formatDateBR(associatedRetreat.start_date)} a ${formatDateBR(associatedRetreat.end_date)}`
+                : formatDateBR(associatedRetreat.start_date)
+              : undefined
+
+            void sendRegistrationConfirmationEmail({
+              participantName: targetName || "Irmão(ã)",
+              eventTitle: associatedRetreat.title,
+              eventDate: dateFormatted,
+              eventLocation: associatedRetreat.location_text || undefined,
+              whatsappGroupUrl: retreatSettings.whatsapp_group_url || undefined,
+              recipientEmail: targetEmail,
+              customSubject: retreatSettings.custom_confirmation_subject || undefined,
+              customMessage: retreatSettings.custom_confirmation_body || undefined,
+            }).catch((err) => console.warn("Aviso ao disparar e-mail de confirmação:", err))
+          }
+
           // Se o participante veio com link de chamada da lista de espera, marcar como inscrito
           const urlParams = new URLSearchParams(window.location.search)
           const waitlistId = urlParams.get("waitlist_id")
@@ -1347,7 +1376,9 @@ export default function FormResponder() {
         toast.dismiss(submitToastId)
         setSubmittedPortalToken(createdPortalToken)
         setSubmitted(true)
-        toast.success("Resposta enviada com sucesso!")
+        toast.success("Resposta enviada com sucesso!", {
+          description: "Os detalhes da inscrição foram enviados para o seu e-mail.",
+        })
       } catch (e: unknown) {
         console.error("Error saving form response to Supabase:", e)
         const errMessage = e instanceof Error ? e.message : "Erro desconhecido"

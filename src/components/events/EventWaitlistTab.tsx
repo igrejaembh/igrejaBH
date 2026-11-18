@@ -21,8 +21,11 @@ import supabase from "@/lib/supabase"
 import { formatValue } from "@/lib/forms"
 import { THEME_CLASSES, WAITLIST_STATUS_CONFIG } from "@/constants/colors"
 import type { Database } from "@/lib/database.types"
+import { sendWaitlistCallEmail } from "@/services/emailService"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import {
@@ -77,6 +80,9 @@ export function EventWaitlistTab({
   const [copiedLink, setCopiedLink] = useState(false)
   const [copiedCode, setCopiedCode] = useState(false)
   const [calling, setCalling] = useState(false)
+  const [emailSubject, setEmailSubject] = useState("")
+  const [emailMessage, setEmailMessage] = useState("")
+  const [sendEmailOnConfirm, setSendEmailOnConfirm] = useState(true)
 
   // Modal para exclusão
   const [entryToDelete, setEntryToDelete] = useState<WaitlistRow | null>(null)
@@ -165,6 +171,11 @@ export function EventWaitlistTab({
     setCallModalEntry(entry)
     setCopiedLink(false)
     setCopiedCode(false)
+    setEmailSubject(`Vaga Liberada: ${retreat.title}`)
+    setEmailMessage(
+      `Graça e paz, ${entry.full_name.split(" ")[0]}!\n\nUma vaga foi aberta para você no encontro ${retreat.title}.\n\nPara garantir a sua participação, por favor acesse o link de inscrição abaixo e confirme seus dados o quanto antes.\n\nCaso não possa comparecer, por favor nos avise para que possamos liberar a vaga para o próximo irmão da fila.`
+    )
+    setSendEmailOnConfirm(Boolean(entry.email))
   }
 
   // Gera link exclusivo direto
@@ -217,7 +228,31 @@ export function EventWaitlistTab({
         }
       }
 
-      // 2. Atualizar status na tabela event_waitlist para 'chamado'
+      // 2. Disparar e-mail de convocação redigido pelo gestor
+      let emailSent = false
+      if (sendEmailOnConfirm && callModalEntry.email) {
+        try {
+          const link = getDirectLink(callModalEntry, generatedCode)
+          const res = await sendWaitlistCallEmail({
+            participantName: callModalEntry.full_name,
+            eventTitle: retreat.title,
+            registrationUrl: link,
+            recipientEmail: callModalEntry.email,
+            customSubject: emailSubject.trim() || undefined,
+            customMessage: emailMessage.trim() || undefined,
+          })
+
+          if (res.success) {
+            emailSent = true
+          } else {
+            console.warn("Aviso no disparo do e-mail de convocação:", res.error)
+          }
+        } catch (eErr) {
+          console.warn("Erro ao enviar e-mail de convocação:", eErr)
+        }
+      }
+
+      // 3. Atualizar status na tabela event_waitlist para 'chamado'
       const { error } = await supabase
         .from("event_waitlist")
         .update({ status: "chamado" })
@@ -225,9 +260,15 @@ export function EventWaitlistTab({
 
       if (error) throw error
 
-      toast.success(
-        `Participante ${callModalEntry.full_name} marcado como chamado!`
-      )
+      if (emailSent) {
+        toast.success(
+          `Participante ${callModalEntry.full_name} convocado e e-mail enviado com sucesso!`
+        )
+      } else {
+        toast.success(
+          `Participante ${callModalEntry.full_name} marcado como chamado!`
+        )
+      }
 
       // Atualizar lista local
       setWaitlist((prev) =>
@@ -833,8 +874,77 @@ export function EventWaitlistTab({
                 </p>
               </div>
 
+              {/* Redação do E-mail de Convocação */}
+              <div className="pt-2 border-t border-border/40 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Mail className="h-4 w-4 text-primary" />
+                    E-mail de Convocação (Personalizável)
+                  </span>
+                  {callModalEntry.email ? (
+                    <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground">
+                      {callModalEntry.email}
+                    </Badge>
+                  ) : (
+                    <Badge variant="destructive" className="text-[10px]">
+                      Sem e-mail cadastrado
+                    </Badge>
+                  )}
+                </div>
+
+                {callModalEntry.email ? (
+                  <div className="space-y-2 rounded-xl bg-muted/30 p-3 border border-border/40">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-muted-foreground">
+                        Assunto do E-mail:
+                      </label>
+                      <Input
+                        value={emailSubject}
+                        onChange={(e) => setEmailSubject(e.target.value)}
+                        placeholder="Assunto do e-mail"
+                        className="h-9 text-xs bg-background"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-muted-foreground">
+                        Mensagem / Corpo:
+                      </label>
+                      <Textarea
+                        value={emailMessage}
+                        onChange={(e) => setEmailMessage(e.target.value)}
+                        placeholder="Mensagem do e-mail..."
+                        rows={4}
+                        className="text-xs bg-background resize-y"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        O botão com o link direto e o código de liberação serão anexados automaticamente ao final do e-mail.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center space-x-2 pt-1.5 border-t border-border/30">
+                      <Checkbox
+                        id="sendEmailCheckbox"
+                        checked={sendEmailOnConfirm}
+                        onCheckedChange={(checked) => setSendEmailOnConfirm(Boolean(checked))}
+                      />
+                      <label
+                        htmlFor="sendEmailCheckbox"
+                        className="text-xs font-medium cursor-pointer text-foreground select-none"
+                      >
+                        Enviar este e-mail ao confirmar a chamada
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                    Este participante não possui e-mail registrado. Utilize o envio direto pelo WhatsApp abaixo.
+                  </p>
+                )}
+              </div>
+
               {/* Envio rápido por WhatsApp */}
-              <div className="pt-2 border-t border-border/40">
+              <div className="pt-1">
                 <Button
                   type="button"
                   asChild
@@ -858,20 +968,24 @@ export function EventWaitlistTab({
                 onClick={() => setCallModalEntry(null)}
                 className="min-h-[44px] cursor-pointer rounded-xl font-semibold text-xs"
               >
-                Fechar
+                Cancelar
               </Button>
               {callModalEntry.status !== "chamado" && (
                 <Button
                   onClick={() => handleConfirmCall(true)}
                   disabled={calling}
-                  className="min-h-[44px] cursor-pointer rounded-xl bg-primary text-primary-foreground font-bold text-xs shadow-xs"
+                  className="min-h-[44px] cursor-pointer rounded-xl bg-primary text-primary-foreground font-bold text-xs shadow-xs gap-1.5"
                 >
                   {calling ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Atualizando...
+                      <Loader2 className="h-4 w-4 animate-spin" /> Convocando...
+                    </>
+                  ) : sendEmailOnConfirm && callModalEntry.email ? (
+                    <>
+                      <Mail className="h-4 w-4" /> Confirmar e Enviar E-mail
                     </>
                   ) : (
-                    "Confirmar e Marcar como Chamado"
+                    <>Confirmar Chamada</>
                   )}
                 </Button>
               )}
