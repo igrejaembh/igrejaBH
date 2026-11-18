@@ -1,7 +1,6 @@
-import { Phone, Edit, MessageSquare, Shield, Baby, BookOpen, UserCheck, MapPin, AlertCircle, HeartHandshake } from "lucide-react"
+import { CornerDownLeft, ArrowLeftRight, Heart, Pencil, Users } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import type { Database } from "@/lib/database.types"
 import { THEME_CLASSES } from "@/constants/colors"
 
@@ -10,337 +9,133 @@ type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 export interface DiscipleCardProps {
   disciple: Profile
   isLeader?: boolean
+  isNucleus?: boolean
   disciplerName?: string | null
-  isCustomDiscipler?: boolean
   spouseName?: string | null
   fatherName?: string | null
   motherName?: string | null
   fellowshipNames?: string[]
-  groupName?: string | null
-  isCoveredRoot?: boolean
-  familyName?: string | null
-  isFamilyHead?: boolean
-  familyRoleLabel?: string | null
   onEdit: (disciple: Profile) => void
-  onTransformChild?: (disciple: Profile) => void
-  onTransformToLinked?: (disciple: Profile) => void
+}
+
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
 }
 
 export function DiscipleCard({
   disciple,
   isLeader = false,
+  isNucleus = false,
   disciplerName,
-  isCustomDiscipler = false,
   spouseName,
   fatherName,
   motherName,
   fellowshipNames = [],
-  groupName,
-  isCoveredRoot = false,
-  familyName,
-  isFamilyHead = false,
-  familyRoleLabel,
   onEdit,
-  onTransformChild,
-  onTransformToLinked,
 }: DiscipleCardProps) {
-  const isChild =
-    !disciple.is_baptized &&
-    !disciple.baptism_date &&
-    !!(disciple.father_id || disciple.mother_id) &&
-    !disciple.discipler_id &&
-    !disciple.spouse_id &&
-    !disciple.is_presbyter &&
-    !disciple.is_deacon
-  const cleanPhone = disciple.phone?.replace(/\D/g, "")
-  const hasPhone = !!cleanPhone && cleanPhone.length >= 10
-  const whatsappUrl = hasPhone
-    ? `https://wa.me/55${cleanPhone}`
-    : null
-
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-  }
-
-  // Identifica se necessita de discipulador (adultos que não têm discipulador e não são presbíteros/cobertura)
-  const needsDiscipler = !isChild && !disciplerName && !disciple.is_presbyter && !isCoveredRoot
+  const hasCompanions = fellowshipNames.length > 0
+  const hasRelationshipMetadata = Boolean(disciplerName || hasCompanions || spouseName)
+  const parentsNames = [fatherName, motherName].filter(Boolean).join(" & ")
+  const showParents = !hasRelationshipMetadata && Boolean(parentsNames)
+  const hasMetadata = hasRelationshipMetadata || showParents
 
   return (
-    <div className="flex flex-col justify-between rounded-2xl border border-border/80 bg-card p-4 shadow-xs transition-all hover:border-primary/40 hover:shadow-md sm:p-5">
-      <div>
-        {/* Cabeçalho do Card: Avatar + Nome + Badges */}
-        <div className="flex items-start gap-3.5">
-          <Avatar className="h-12 w-12 shrink-0 border border-border shadow-inner">
-            <AvatarImage
-              src={disciple.avatar_url || undefined}
-              alt={disciple.full_name}
-            />
-            <AvatarFallback className="font-semibold text-xs sm:text-sm bg-muted text-foreground">
-              {getInitials(disciple.full_name)}
-            </AvatarFallback>
-          </Avatar>
+    <button
+      type="button"
+      onClick={() => onEdit(disciple)}
+      aria-label={`Editar informações de ${disciple.full_name}`}
+      className="group flex h-full min-h-[44px] w-full cursor-pointer items-start gap-3 rounded-2xl border border-border/80 bg-card p-3.5 text-left shadow-xs transition-colors hover:border-primary/40 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:p-4"
+    >
+      {/* a. Avatar */}
+      <Avatar className="size-11 shrink-0 border border-border">
+        <AvatarImage
+          src={disciple.avatar_url || undefined}
+          alt={disciple.full_name}
+        />
+        <AvatarFallback className="bg-muted text-xs font-semibold text-foreground">
+          {getInitials(disciple.full_name)}
+        </AvatarFallback>
+      </Avatar>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <h3 className="truncate font-semibold text-foreground text-base tracking-tight">
-                {disciple.full_name}
-              </h3>
-            </div>
+      <div className="min-w-0 flex-1">
+        {/* b. Nome + tags (Líder / Núcleo) + ícone discreto de edição */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            <h3 className="min-w-0 truncate text-sm font-semibold leading-snug tracking-tight text-foreground sm:text-base">
+              {disciple.full_name}
+            </h3>
+            {isLeader && (
+              <Badge variant="outline" className={THEME_CLASSES.badgeGroupLeader}>
+                Líder
+              </Badge>
+            )}
+            {isNucleus && (
+              <Badge variant="outline" className={THEME_CLASSES.badgeGroupNucleus}>
+                Núcleo
+              </Badge>
+            )}
+          </div>
+          <Pencil
+            aria-hidden="true"
+            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground"
+          />
+        </div>
 
-            {/* Badges de Papel e Status */}
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              {isLeader && (
-                <Badge
-                  variant="outline"
-                  className={`${THEME_CLASSES.badgeSuccess} text-[11px] font-medium`}
-                >
-                  <Shield className="mr-1 h-3 w-3" />
-                  Líder de GC
-                </Badge>
-              )}
-              {disciple.is_presbyter && (
-                <Badge
-                  variant="outline"
-                  className={`${THEME_CLASSES.badgePrimary} text-[11px] font-medium`}
-                >
-                  Presbítero
-                </Badge>
-              )}
-              {disciple.is_deacon && (
-                <Badge
-                  variant="outline"
-                  className={`${THEME_CLASSES.badgeWarning} text-[11px] font-medium`}
-                >
-                  Diácono
-                </Badge>
-              )}
-              {isChild && (
-                <Badge
-                  variant="outline"
-                  className={`${THEME_CLASSES.badgeInfo} text-[11px] font-medium`}
-                >
-                  <Baby className="mr-1 h-3 w-3" />
-                  Criança
-                </Badge>
-              )}
-              {isFamilyHead && (
-                <Badge
-                  variant="outline"
-                  className="border-primary/40 bg-primary/10 text-primary text-[11px] font-medium"
-                >
-                  {familyRoleLabel || "Chefe da Família"}
-                </Badge>
-              )}
-              {!disciple.is_church_linked && (
-                <Badge
-                  variant="outline"
-                  className={`${THEME_CLASSES.badgePriority} text-[11px] font-medium`}
-                >
-                  Visitante nos Estudos
-                </Badge>
-              )}
-              {disciple.marital_status && (
-                <span className="text-[11px] text-muted-foreground capitalize">
-                  {disciple.marital_status === "casado"
-                    ? "Casado(a)"
-                    : disciple.marital_status === "solteiro"
-                    ? "Solteiro(a)"
-                    : disciple.marital_status === "viuvo"
-                    ? "Viúvo(a)"
-                    : disciple.marital_status}
-                </span>
-              )}
-            </div>
+        {/* c, d, e: Discipulador, Companheiro e Cônjuge (ou Pais na ausência destes) */}
+        {hasMetadata && (
+          <div className="mt-2 flex flex-col gap-1 text-xs font-normal text-muted-foreground">
+            {disciplerName && (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <CornerDownLeft
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-muted-foreground/80"
+                />
+                <span className="sr-only">Discipulador: </span>
+                <span className="truncate">{disciplerName}</span>
+              </div>
+            )}
 
-            {groupName && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" />
-                <span className="truncate font-medium text-foreground/90">{groupName}</span>
+            {hasCompanions && (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <ArrowLeftRight
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-muted-foreground/80"
+                />
+                <span className="sr-only">Companheiro: </span>
+                <span className="truncate">{fellowshipNames.join(", ")}</span>
+              </div>
+            )}
+
+            {spouseName && (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Heart
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-muted-foreground/80"
+                />
+                <span className="sr-only">Cônjuge: </span>
+                <span className="truncate">{spouseName}</span>
+              </div>
+            )}
+
+            {showParents && (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Users
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-muted-foreground/80"
+                />
+                <span className="sr-only">Pais: </span>
+                <span className="truncate">{parentsNames}</span>
               </div>
             )}
           </div>
-        </div>
-
-        {/* Bloco de Acompanhamento (Linguagem Clara e Humana) */}
-        {!disciple.is_church_linked ? (
-          <div className="mt-3.5 space-y-1.5 rounded-xl bg-muted/50 border border-border/80 p-3 text-xs">
-            <div className="flex items-center gap-1.5 font-medium text-foreground">
-              <BookOpen className="h-3.5 w-3.5 text-primary" />
-              <span>Irmão em Acolhimento nos Estudos</span>
-            </div>
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Participando das reuniões bíblicas nos lares antes do vínculo pleno com a igreja local.
-            </p>
-          </div>
-        ) : (
-          <div className="mt-3.5 space-y-2 rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground border border-border/50">
-            <div className="flex items-center gap-1.5 font-semibold text-foreground/90">
-              <HeartHandshake className="h-3.5 w-3.5 text-primary" />
-              <span>Acompanhamento e Família</span>
-            </div>
-
-            {!isChild ? (
-              <>
-                {/* Discipulador */}
-                <div className="flex items-start justify-between gap-2 border-t border-border/40 pt-1.5">
-                  <span className="shrink-0 text-muted-foreground">Discipulador(a):</span>
-                  <span className="font-medium text-right text-foreground">
-                    {disciplerName ? (
-                      isCustomDiscipler ? (
-                        <span className="inline-flex items-center gap-1.5 flex-wrap justify-end">
-                          <span className="font-semibold text-amber-800 dark:text-amber-300">{disciplerName}</span>
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                            Não encontrado
-                          </span>
-                        </span>
-                      ) : (
-                        disciplerName
-                      )
-                    ) : disciple.is_presbyter || isCoveredRoot ? (
-                      <span className="text-primary font-medium">
-                        Cuidado Mútuo
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400">
-                        <AlertCircle className="h-3 w-3 shrink-0" />
-                        Precisa de discipulador
-                      </span>
-                    )}
-                  </span>
-                </div>
-
-                {/* Cônjuge */}
-                {spouseName && (
-                  <div className="flex items-start justify-between gap-2 border-t border-border/40 pt-1.5">
-                    <span className="shrink-0 text-muted-foreground">Cônjuge:</span>
-                    <span className="font-medium text-right text-foreground">{spouseName}</span>
-                  </div>
-                )}
-
-                {/* Família (para integrantes em famílias de múltiplos membros) */}
-                {familyName && !isFamilyHead && (
-                  <div className="flex items-start justify-between gap-2 border-t border-border/40 pt-1.5">
-                    <span className="shrink-0 text-muted-foreground">Família:</span>
-                    <span className="font-medium text-right text-foreground">
-                      {familyName}
-                      {familyRoleLabel && familyRoleLabel !== "Familiar" && familyRoleLabel !== "Própria família"
-                        ? ` (${familyRoleLabel})`
-                        : ""}
-                    </span>
-                  </div>
-                )}
-
-                {/* Companheiros de Oração e Serviço */}
-                {fellowshipNames.length > 0 && (
-                  <div className="border-t border-border/40 pt-1.5">
-                    <span className="text-muted-foreground">Companheiro(s) de oração/serviço:</span>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {fellowshipNames.map((name, idx) => (
-                        <span
-                          key={idx}
-                          className="rounded-md bg-background px-2 py-0.5 text-[11px] font-medium text-foreground border border-border/60"
-                        >
-                          {name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                {/* Para Crianças: Pais */}
-                <div className="flex items-start justify-between gap-2 border-t border-border/40 pt-1.5">
-                  <span className="shrink-0 text-muted-foreground">Pais / Responsáveis:</span>
-                  <span className="font-medium text-right text-foreground">
-                    {[fatherName, motherName].filter(Boolean).join(" & ") || (
-                      <span className="italic text-muted-foreground">Não informado</span>
-                    )}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Alerta de Discipulador Não Encontrado no Sistema */}
-        {isCustomDiscipler && (
-          <div className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 border border-amber-500/20">
-            <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span>Discipulador &ldquo;{disciplerName}&rdquo; não encontrado no cadastro do sistema.</span>
-          </div>
-        )}
-
-        {/* Alerta de Cuidado para quem não tem discipulador */}
-        {needsDiscipler && (
-          <div className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 border border-amber-500/20">
-            <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span>Defina um discipulador para acompanhar e orar com este irmão.</span>
-          </div>
-        )}
-
-        {/* Ação para Crianças: Registrar Batismo */}
-        {isChild && onTransformChild && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onTransformChild(disciple)}
-            className="mt-2.5 h-11 min-h-[44px] w-full rounded-xl text-xs font-semibold shadow-2xs"
-          >
-            <span>Registrar Batismo</span>
-          </Button>
         )}
       </div>
-
-      {/* Ações Imediatas: WhatsApp e Editar / Integrar (Touch targets >= 44px) */}
-      <div className="mt-4 flex items-center gap-2 border-t border-border/60 pt-3">
-        {whatsappUrl ? (
-          <Button
-            asChild
-            variant="outline"
-            className="h-11 min-h-[44px] flex-1 gap-1.5 rounded-xl text-xs font-semibold border-emerald-600/30 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
-          >
-            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
-              <MessageSquare className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="truncate">WhatsApp</span>
-            </a>
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            disabled
-            className="h-11 min-h-[44px] flex-1 gap-1.5 rounded-xl text-xs opacity-50 cursor-not-allowed"
-          >
-            <Phone className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="truncate">Sem WhatsApp</span>
-          </Button>
-        )}
-
-        {disciple.is_church_linked !== false ? (
-          <Button
-            onClick={() => onEdit(disciple)}
-            variant="secondary"
-            className="h-11 min-h-[44px] flex-1 gap-1.5 rounded-xl text-xs font-semibold cursor-pointer shadow-2xs"
-          >
-            <Edit className="h-4 w-4 shrink-0" />
-            <span className="truncate">Editar</span>
-          </Button>
-        ) : (
-          <Button
-            onClick={() => (onTransformToLinked ? onTransformToLinked(disciple) : onEdit(disciple))}
-            className="h-11 min-h-[44px] flex-1 gap-1.5 rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
-          >
-            <UserCheck className="h-4 w-4 shrink-0" />
-            <span className="truncate">Integrar</span>
-          </Button>
-        )}
-      </div>
-    </div>
+    </button>
   )
 }

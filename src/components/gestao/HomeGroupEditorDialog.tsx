@@ -8,16 +8,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SearchableSelect } from "@/components/ui/searchable-select"
-import { MapPin, Clock, Calendar, Users, Loader2, Search, Layers } from "lucide-react"
+import { MapPin, Clock, Calendar, Users, Loader2, Search } from "lucide-react"
 import { toast } from "sonner"
 import supabase from "@/lib/supabase"
 import type { Database } from "@/lib/database.types"
@@ -60,7 +54,6 @@ export function HomeGroupEditorDialog({
   const [meetingDay, setMeetingDay] = useState<number>(3) // Quarta-feira
   const [startTime, setStartTime] = useState<string>("20:00")
   const [locationText, setLocationText] = useState<string>("")
-  const [nucleusName, setNucleusName] = useState<string>("")
   const [lat, setLat] = useState<number | null>(null)
   const [lng, setLng] = useState<number | null>(null)
   const [leader1Id, setLeader1Id] = useState<string>("")
@@ -76,7 +69,6 @@ export function HomeGroupEditorDialog({
         setMeetingDay(homeGroup.meeting_day ?? 3)
         setStartTime(homeGroup.start_time || "20:00")
         setLocationText(homeGroup.location_text || "")
-        setNucleusName(homeGroup.nucleus_name || "")
         setLat(homeGroup.lat)
         setLng(homeGroup.lng)
         setLeader1Id(homeGroup.leader_1_id || "")
@@ -86,7 +78,6 @@ export function HomeGroupEditorDialog({
         setMeetingDay(3)
         setStartTime("20:00")
         setLocationText("")
-        setNucleusName("")
         setLat(null)
         setLng(null)
         setLeader1Id("")
@@ -275,7 +266,6 @@ export function HomeGroupEditorDialog({
         meeting_day: meetingDay,
         start_time: startTime,
         location_text: locationText.trim(),
-        nucleus_name: nucleusName.trim() || null,
         lat: lat,
         lng: lng,
       }
@@ -304,7 +294,12 @@ export function HomeGroupEditorDialog({
       onOpenChange(false)
     } catch (err: unknown) {
       console.error("Erro ao salvar grupo:", err)
-      const message = err instanceof Error ? err.message : "Erro desconhecido."
+      const message =
+        err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string"
+          ? (err as { message: string }).message
+          : err instanceof Error
+          ? err.message
+          : "Erro desconhecido."
       toast.error(`Não foi possível salvar: ${message}`)
     } finally {
       setSaving(false)
@@ -327,35 +322,6 @@ export function HomeGroupEditorDialog({
 
         {/* Corpo com Scroll Integrado ao Modal */}
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 sm:px-6 space-y-4 overscroll-contain custom-scrollbar">
-          {/* Identificação / Nome do Núcleo (Disponível para Tier 3 e líderes em edição) */}
-          <div className="rounded-xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs">
-            <FieldGroup className="gap-3">
-              <div className="flex items-center gap-2 border-b border-border/50 pb-2">
-                <Layers className="h-4 w-4 text-primary shrink-0" />
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground">
-                  Identificação do Núcleo
-                </h4>
-              </div>
-
-              <Field className="min-w-0">
-                <FieldLabel htmlFor="nucleusName" className="text-xs font-medium text-foreground">
-                  Nome do Núcleo do Grupo
-                </FieldLabel>
-                <Input
-                  id="nucleusName"
-                  value={nucleusName}
-                  onChange={(e) => setNucleusName(e.target.value)}
-                  placeholder="Ex: Núcleo Castelo / Pampulha"
-                  maxLength={120}
-                  className="h-11 min-h-[44px] rounded-xl text-sm"
-                />
-                <FieldDescription className="text-[11px]">
-                  Identificação do núcleo regional ou agrupamento deste Grupo Caseiro (opcional).
-                </FieldDescription>
-              </Field>
-            </FieldGroup>
-          </div>
-
           {/* Liderança e Setor (Apenas Nível 3 - Diáconos, Presbíteros, Devs) */}
           {isTier3 && (
             <div className="space-y-4 rounded-xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs">
