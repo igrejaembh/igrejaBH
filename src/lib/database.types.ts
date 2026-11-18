@@ -591,6 +591,7 @@ export type Database = {
           cancelled_at: string | null
           checked_in_at: string | null
           checked_in_by: string | null
+          checkin_flags: Json
           created_at: string | null
           custom_responses: Json | null
           form_submission_id: string | null
@@ -601,6 +602,7 @@ export type Database = {
           payment_method: string | null
           payment_reference: string | null
           profile_id: string | null
+          qr_token: string
           retreat_id: string | null
           room_allocation: string | null
           room_id: string | null
@@ -612,6 +614,7 @@ export type Database = {
           cancelled_at?: string | null
           checked_in_at?: string | null
           checked_in_by?: string | null
+          checkin_flags?: Json
           created_at?: string | null
           custom_responses?: Json | null
           form_submission_id?: string | null
@@ -622,6 +625,7 @@ export type Database = {
           payment_method?: string | null
           payment_reference?: string | null
           profile_id?: string | null
+          qr_token?: string
           retreat_id?: string | null
           room_allocation?: string | null
           room_id?: string | null
@@ -633,6 +637,7 @@ export type Database = {
           cancelled_at?: string | null
           checked_in_at?: string | null
           checked_in_by?: string | null
+          checkin_flags?: Json
           created_at?: string | null
           custom_responses?: Json | null
           form_submission_id?: string | null
@@ -643,6 +648,7 @@ export type Database = {
           payment_method?: string | null
           payment_reference?: string | null
           profile_id?: string | null
+          qr_token?: string
           retreat_id?: string | null
           room_allocation?: string | null
           room_id?: string | null
@@ -836,6 +842,7 @@ export type Database = {
       }
       retreats: {
         Row: {
+          checkin_checklist_config: Json
           created_at: string | null
           description: string | null
           end_date: string | null
@@ -854,6 +861,7 @@ export type Database = {
           title: string
         }
         Insert: {
+          checkin_checklist_config?: Json
           created_at?: string | null
           description?: string | null
           end_date?: string | null
@@ -872,6 +880,7 @@ export type Database = {
           title: string
         }
         Update: {
+          checkin_checklist_config?: Json
           created_at?: string | null
           description?: string | null
           end_date?: string | null
@@ -1097,6 +1106,10 @@ export type Database = {
       claim_participant_registrations: {
         Args: Record<PropertyKey, never>
         Returns: number
+      }
+      checkin_registration_by_qr: {
+        Args: { p_qr_token: string; p_retreat_id: string }
+        Returns: Json
       }
       check_cpf_registration: {
         Args: { p_cpf: string }

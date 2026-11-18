@@ -597,3 +597,25 @@ export function getServiceTeamColorConfig(teamId?: string | null) {
   return SERVICE_TEAM_COLORS[normalized] ?? null;
 }
 
+// ==========================================
+// 11. TOKENS DE CHECK-IN QR CODE E CHECKLIST DE PORTARIA
+// ==========================================
+export const QR_BADGE_COLORS = {
+  /** Cores de alto contraste (21:1) obrigatórias para leitura óptica de QR Code */
+  qrDark: PALETTE.black,
+  qrLight: PALETTE.white,
+  surfaceLight: PALETTE.white,
+  borderPrint: PALETTE.black,
+  mutedPrint: PALETTE.zinc[600],
+} as const;
+
+export const CHECKIN_FLAG_CLASSES = {
+  checked:
+    "bg-emerald-50 border-emerald-600/40 text-emerald-900 hover:bg-emerald-100/80 dark:bg-emerald-950/50 dark:border-emerald-400/40 dark:text-emerald-200 dark:hover:bg-emerald-950/70",
+  unchecked:
+    "bg-zinc-50 border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:bg-zinc-800/70 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800",
+  scannedHighlight:
+    "border-primary ring-2 ring-primary/30 bg-white dark:bg-zinc-900",
+} as const;
+
+

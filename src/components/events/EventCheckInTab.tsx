@@ -12,28 +12,62 @@ import {
   Loader2,
   FileText,
   HeartHandshake,
+  QrCode,
+  Printer,
+  ListChecks,
+  Check,
+  Square,
 } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
+import type { Json } from "@/lib/database.types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { ChurchAvatar } from "@/components/ui/church-avatar";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatTimeBR } from "@/lib/utils";
 import { getServiceTeam, getServiceTeamBadgeStyle } from "@/constants/serviceTeams";
+import { CHECKIN_FLAG_CLASSES } from "@/constants/colors";
+import {
+  DEFAULT_CHECKIN_CHECKLIST,
+  parseCheckinFlags,
+  type CheckinChecklistItem,
+  type CheckinFlagsMap,
+} from "@/lib/checkinFlags";
+import { CheckinChecklistConfigDialog } from "@/components/events/CheckinChecklistConfigEditor";
+import { QrScannerDialog } from "@/components/events/QrScannerDialog";
+import { EventBadgePrintDialog } from "@/components/events/EventBadgePrintDialog";
 import type { RegistrationWithDetails } from "@/components/events/RegistrationDetailDialog";
 import type { RetreatRoom } from "@/components/events/RoomManagementTab";
 
 interface EventCheckInTabProps {
   retreatId?: string;
   retreatTitle: string;
+  retreatStartDate?: string | null;
+  retreatEndDate?: string | null;
+  retreatLocation?: string | null;
   registrations: RegistrationWithDetails[];
   retreatRooms: RetreatRoom[];
+  checklistConfig?: CheckinChecklistItem[];
+  homeGroupsMap?: Map<string, string>;
   onUpdateRegistration: (updated: RegistrationWithDetails) => void;
   onRefreshRegistrations?: () => void;
   onViewDetails?: (registration: RegistrationWithDetails) => void;
+  onChecklistConfigUpdated?: (nextConfig: CheckinChecklistItem[]) => void;
+  onUpdateCheckinFlags?: (
+    regId: string,
+    flags: CheckinFlagsMap
+  ) => Promise<void> | void;
 }
 
 type QuickFilter = "all" | "present" | "pending";
@@ -62,25 +96,51 @@ function formatCpf(cpf?: string | null): string {
 }
 
 export function EventCheckInTab({
+  retreatId,
   retreatTitle,
+  retreatStartDate,
+  retreatEndDate,
+  retreatLocation,
   registrations,
   retreatRooms,
+  checklistConfig,
+  homeGroupsMap,
   onUpdateRegistration,
   onRefreshRegistrations,
   onViewDetails,
+  onChecklistConfigUpdated,
+  onUpdateCheckinFlags,
 }: EventCheckInTabProps) {
   // Estado da busca com debounce
   const [searchInput, setSearchInput] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
-  // Filtro rápido de status
+  // Filtro rápido de status e filtro de flags
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const [flagFilter, setFlagFilter] = useState<string>("all");
 
-  // ID da inscrição atualmente sofrendo mutação de check-in
+  // ID da inscrição atualmente sofrendo mutação de check-in ou flag
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [savingFlagId, setSavingFlagId] = useState<string | null>(null);
+
+  // Destaque de participante recém-escaneado via QR Code
+  const [highlightedRegId, setHighlightedRegId] = useState<string | null>(null);
+
+  // Diálogos de Portaria (QR Scanner, Emissão de Crachás, Configuração de Checklist)
+  const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
+  const [isBadgePrintOpen, setIsBadgePrintOpen] = useState(false);
+  const [isChecklistConfigOpen, setIsChecklistConfigOpen] = useState(false);
 
   // Perfil do operador de recepção logado
   const [operatorProfileId, setOperatorProfileId] = useState<string | null>(null);
+
+  const effectiveChecklist = useMemo(
+    () =>
+      checklistConfig !== undefined
+        ? checklistConfig
+        : DEFAULT_CHECKIN_CHECKLIST,
+    [checklistConfig]
+  );
 
   // Carrega o perfil do operador logado para associar a checked_in_by
   useEffect(() => {
@@ -129,18 +189,45 @@ export function EventCheckInTab({
   const pendingCount = totalCount - presentCount;
   const percentagePresent = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
 
-  // Filtragem reactiva com normalização de texto, CPF e telefone
+  // Contadores por item da checklist configurada
+  const flagStats = useMemo(() => {
+    return effectiveChecklist.map((item) => {
+      const doneCount = activeRegistrations.filter((reg) => {
+        const flags = parseCheckinFlags(reg.checkin_flags);
+        return Boolean(flags[item.key]);
+      }).length;
+      return {
+        ...item,
+        doneCount,
+        pendingCount: Math.max(0, totalCount - doneCount),
+      };
+    });
+  }, [effectiveChecklist, activeRegistrations, totalCount]);
+
+  // Filtragem reactiva com normalização de texto, CPF, telefone e flags
   const filteredRegistrations = useMemo(() => {
     const queryNormalized = normalizeText(debouncedQuery);
     const digitsOnlyQuery = debouncedQuery.replace(/\D/g, "");
 
-    return activeRegistrations.filter((reg) => {
+    const matched = activeRegistrations.filter((reg) => {
       // 1. Filtro rápido de status
       const isPresent = Boolean(reg.checked_in_at) || reg.status === "presente";
       if (quickFilter === "present" && !isPresent) return false;
       if (quickFilter === "pending" && isPresent) return false;
 
-      // 2. Filtro de busca
+      // 2. Filtro de item da checklist
+      if (flagFilter !== "all") {
+        const flags = parseCheckinFlags(reg.checkin_flags);
+        if (flagFilter.startsWith("done:")) {
+          const key = flagFilter.slice(5);
+          if (!flags[key]) return false;
+        } else if (flagFilter.startsWith("pending:")) {
+          const key = flagFilter.slice(8);
+          if (flags[key]) return false;
+        }
+      }
+
+      // 3. Filtro de busca
       if (!queryNormalized) return true;
 
       const profileName = reg.profiles?.full_name || "";
@@ -158,16 +245,36 @@ export function EventCheckInTab({
         (reg.guest_data as { phone?: string } | null)?.phone || "";
       const phoneDigits = (profilePhone || guestPhone).replace(/\D/g, "");
 
+      const qrToken = (reg.qr_token || "").toLowerCase();
+
       // Combina critérios
       const matchesName = normalizeText(name).includes(queryNormalized);
       const matchesCpf =
         digitsOnlyQuery.length > 0 && cpfDigits.includes(digitsOnlyQuery);
       const matchesPhone =
         digitsOnlyQuery.length >= 3 && phoneDigits.includes(digitsOnlyQuery);
+      const matchesToken =
+        queryNormalized.length >= 4 && qrToken.includes(queryNormalized);
 
-      return matchesName || matchesCpf || matchesPhone;
+      return matchesName || matchesCpf || matchesPhone || matchesToken;
     });
-  }, [registrations, quickFilter, debouncedQuery]);
+
+    if (highlightedRegId) {
+      const idx = matched.findIndex((r) => r.id === highlightedRegId);
+      if (idx > 0) {
+        const target = matched[idx];
+        return [target, ...matched.slice(0, idx), ...matched.slice(idx + 1)];
+      }
+    }
+
+    return matched;
+  }, [
+    activeRegistrations,
+    quickFilter,
+    flagFilter,
+    debouncedQuery,
+    highlightedRegId,
+  ]);
 
   // Helper para obter nome do quarto alocado
   const getRoomName = useCallback(
@@ -309,11 +416,119 @@ export function EventCheckInTab({
     }
   };
 
+  // Ação 3: Alternar flag de controle na portaria (com persistência imediata)
+  const handleToggleFlag = async (
+    reg: RegistrationWithDetails,
+    flagKey: string
+  ) => {
+    const lockKey = `${reg.id}:${flagKey}`;
+    if (savingFlagId) return;
+    setSavingFlagId(lockKey);
+
+    const currentFlags = parseCheckinFlags(reg.checkin_flags);
+    const nextFlags: CheckinFlagsMap = {
+      ...currentFlags,
+      [flagKey]: !currentFlags[flagKey],
+    };
+
+    try {
+      if (onUpdateCheckinFlags) {
+        await onUpdateCheckinFlags(reg.id, nextFlags);
+      } else {
+        const { error } = await supabase
+          .from("registrations")
+          .update({ checkin_flags: nextFlags as unknown as Json })
+          .eq("id", reg.id);
+
+        if (error) throw error;
+
+        onUpdateRegistration({
+          ...reg,
+          checkin_flags: nextFlags as unknown as Json,
+        });
+      }
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Erro ao atualizar item da checklist";
+      toast.error(`Falha ao atualizar controle: ${msg}`);
+    } finally {
+      setSavingFlagId(null);
+    }
+  };
+
+  const focusHighlightedCard = useCallback((regId: string) => {
+    setQuickFilter("all");
+    setFlagFilter("all");
+    setSearchInput("");
+    setDebouncedQuery("");
+    setHighlightedRegId(regId);
+
+    window.setTimeout(() => {
+      document
+        .getElementById(`checkin-card-${regId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+  }, []);
+
+  const handleQrCheckInSuccess = (payload: {
+    registrationId: string;
+    checkedInAt: string;
+    checkedInBy: string | null;
+    alreadyCheckedIn: boolean;
+  }) => {
+    const existing = registrations.find((r) => r.id === payload.registrationId);
+    if (existing) {
+      const updatedReg: RegistrationWithDetails = {
+        ...existing,
+        status: "presente",
+        checked_in_at: existing.checked_in_at || payload.checkedInAt,
+        checked_in_by: existing.checked_in_by || payload.checkedInBy,
+      };
+      onUpdateRegistration(updatedReg);
+
+      const participantName = getParticipantName(updatedReg);
+      const roomName = getRoomName(updatedReg);
+
+      if (payload.alreadyCheckedIn) {
+        toast.info(`${participantName} já estava credenciado(a).`, {
+          description: roomName
+            ? `Quarto: ${roomName}. Confira os itens de controle no card.`
+            : "Confira os itens de controle no card destacado.",
+        });
+      } else {
+        toast.success(
+          roomName
+            ? `Check-in QR confirmado! Quarto: ${roomName}`
+            : "Check-in QR confirmado! Sem quarto alocado.",
+          {
+            description: `${participantName} — marque os itens de portaria no card.`,
+          }
+        );
+      }
+    } else {
+      onRefreshRegistrations?.();
+      toast.success("Check-in via QR Code confirmado!");
+    }
+
+    focusHighlightedCard(payload.registrationId);
+  };
+
+  const handleManualSelectFromScanner = async (reg: RegistrationWithDetails) => {
+    const alreadyPresent =
+      Boolean(reg.checked_in_at) || reg.status === "presente";
+    if (!alreadyPresent) {
+      await handleCheckIn(reg);
+    }
+    focusHighlightedCard(reg.id);
+  };
+
   return (
     <div className="w-full max-w-full space-y-5 overflow-x-hidden">
       {/* 1. Placar ao Vivo (KPIs e Barra de Progresso) */}
       <Card className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 sm:p-5 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <span className="flex size-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -326,12 +541,45 @@ export function EventCheckInTab({
             </p>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-            <Users className="w-4 h-4 text-primary" />
-            <span>Total de Inscritos:</span>
-            <span className="font-extrabold text-zinc-900 dark:text-zinc-100 text-sm">
-              {totalCount}
-            </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {retreatId && (
+              <Button
+                type="button"
+                onClick={() => setIsQrScannerOpen(true)}
+                className="min-h-[44px] h-11 px-4 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                <QrCode className="w-4 h-4 mr-1.5" />
+                <span>Ler QR Code</span>
+              </Button>
+            )}
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsBadgePrintOpen(true)}
+              className="min-h-[44px] h-11 px-4 rounded-xl text-xs font-semibold cursor-pointer"
+            >
+              <Printer className="w-4 h-4 mr-1.5" />
+              <span>Emitir Crachás</span>
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsChecklistConfigOpen(true)}
+              className="min-h-[44px] h-11 px-3.5 rounded-xl text-xs font-semibold cursor-pointer"
+            >
+              <ListChecks className="w-4 h-4 mr-1.5" />
+              <span>Configurar Checklist</span>
+            </Button>
+
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400 pl-1">
+              <Users className="w-4 h-4 text-primary" />
+              <span>Total:</span>
+              <span className="font-extrabold text-zinc-900 dark:text-zinc-100 text-sm">
+                {totalCount}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -399,6 +647,52 @@ export function EventCheckInTab({
             className="h-3 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden"
           />
         </div>
+
+        {/* Contadores dos itens da checklist de portaria */}
+        {flagStats.length > 0 && (
+          <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80 space-y-2">
+            <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="font-semibold flex items-center gap-1.5">
+                <ListChecks className="w-3.5 h-3.5 text-primary" />
+                <span>Resumo da Checklist de Portaria</span>
+              </span>
+              {flagFilter !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setFlagFilter("all")}
+                  className="min-h-[44px] px-2 text-xs font-semibold text-primary hover:underline cursor-pointer"
+                >
+                  Limpar filtro de item
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {flagStats.map((stat) => {
+                const filterKey = `done:${stat.key}`;
+                const isSelected = flagFilter === filterKey;
+                return (
+                  <button
+                    key={stat.key}
+                    type="button"
+                    onClick={() =>
+                      setFlagFilter(isSelected ? "all" : filterKey)
+                    }
+                    className={`min-h-[44px] px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
+                      isSelected
+                        ? CHECKIN_FLAG_CLASSES.checked
+                        : "bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    <span>{stat.label}:</span>
+                    <span className="font-black">
+                      {stat.doneCount}/{totalCount}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* 2. Barra de Busca Instantânea Proeminente */}
@@ -493,6 +787,31 @@ export function EventCheckInTab({
               {pendingCount}
             </span>
           </button>
+
+          {effectiveChecklist.length > 0 && (
+            <div className="min-w-[210px] shrink-0">
+              <Select value={flagFilter} onValueChange={setFlagFilter}>
+                <SelectTrigger className="min-h-[44px] h-11 rounded-xl text-xs font-semibold bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800">
+                  <SelectValue placeholder="Filtrar por checklist" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="all">Checklist: Todos</SelectItem>
+                    {effectiveChecklist.map((item) => (
+                      <SelectItem key={`done-${item.key}`} value={`done:${item.key}`}>
+                        Com: {item.label}
+                      </SelectItem>
+                    ))}
+                    {effectiveChecklist.map((item) => (
+                      <SelectItem key={`pending-${item.key}`} value={`pending:${item.key}`}>
+                        Sem: {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -562,23 +881,48 @@ export function EventCheckInTab({
         {/* Grid de Cards dos Participantes */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
           {filteredRegistrations.map((reg) => {
-            const isPresent = Boolean(reg.checked_in_at);
+            const isPresent = Boolean(reg.checked_in_at) || reg.status === "presente";
             const isProcessing = processingId === reg.id;
+            const isHighlighted = highlightedRegId === reg.id;
             const name = getParticipantName(reg);
             const phone = getParticipantPhone(reg);
             const cpf = getParticipantCpf(reg);
             const roomName = getRoomName(reg);
             const isPaid = Boolean(reg.paid);
+            const regFlags = parseCheckinFlags(reg.checkin_flags);
 
             return (
               <Card
+                id={`checkin-card-${reg.id}`}
                 key={reg.id}
                 className={`rounded-2xl p-4 transition-all duration-200 border shadow-xs flex flex-col justify-between gap-3.5 ${
-                  isPresent
+                  isHighlighted
+                    ? CHECKIN_FLAG_CLASSES.scannedHighlight
+                    : isPresent
                     ? "bg-white dark:bg-zinc-900 border-emerald-500/40 dark:border-emerald-500/30 ring-1 ring-emerald-500/10"
                     : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
                 }`}
               >
+                {/* Faixa de destaque quando recém-lido via QR Code */}
+                {isHighlighted && (
+                  <div className="flex items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary">
+                    <span className="flex items-center gap-1.5 truncate">
+                      <QrCode className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">
+                        Selecionado na portaria — marque os controles abaixo
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setHighlightedRegId(null)}
+                      aria-label="Limpar destaque"
+                      className="min-h-[44px] min-w-[44px] -my-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-primary/10 cursor-pointer shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 {/* Topo do Card: Avatar, Nome e Status */}
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-2.5">
@@ -716,6 +1060,42 @@ export function EventCheckInTab({
                         </span>
                       </p>
                     )}
+
+                    {/* Flags interativas de controle na portaria */}
+                    {effectiveChecklist.length > 0 && (
+                      <div className="pt-1.5 flex flex-wrap gap-1.5">
+                        {effectiveChecklist.map((item) => {
+                          const isChecked = Boolean(regFlags[item.key]);
+                          const isSavingThis =
+                            savingFlagId === `${reg.id}:${item.key}`;
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              disabled={Boolean(savingFlagId)}
+                              onClick={() => void handleToggleFlag(reg, item.key)}
+                              aria-pressed={isChecked}
+                              className={`min-h-[44px] px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 ${
+                                isChecked
+                                  ? CHECKIN_FLAG_CLASSES.checked
+                                  : CHECKIN_FLAG_CLASSES.unchecked
+                              }`}
+                            >
+                              {isSavingThis ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                              ) : isChecked ? (
+                                <Check className="w-3.5 h-3.5 shrink-0" />
+                              ) : (
+                                <Square className="w-3.5 h-3.5 shrink-0 opacity-65" />
+                              )}
+                              <span className="text-left leading-tight">
+                                {item.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -786,6 +1166,46 @@ export function EventCheckInTab({
           })}
         </div>
       </div>
+
+      {/* Modal: Leitor de QR Code na Portaria */}
+      {retreatId && (
+        <QrScannerDialog
+          isOpen={isQrScannerOpen}
+          onClose={() => setIsQrScannerOpen(false)}
+          retreatId={retreatId}
+          retreatTitle={retreatTitle}
+          registrations={registrations}
+          onQrCheckInSuccess={handleQrCheckInSuccess}
+          onManualSelectParticipant={handleManualSelectFromScanner}
+        />
+      )}
+
+      {/* Modal: Emissão de Crachás A4 com QR Code */}
+      <EventBadgePrintDialog
+        isOpen={isBadgePrintOpen}
+        onClose={() => setIsBadgePrintOpen(false)}
+        retreat={{
+          id: retreatId || "",
+          title: retreatTitle,
+          start_date: retreatStartDate,
+          end_date: retreatEndDate,
+          location_text: retreatLocation,
+        }}
+        registrations={registrations}
+        homeGroupsMap={homeGroupsMap}
+      />
+
+      {/* Modal: Configuração Rápida da Checklist de Portaria */}
+      <CheckinChecklistConfigDialog
+        isOpen={isChecklistConfigOpen}
+        onClose={() => setIsChecklistConfigOpen(false)}
+        retreatId={retreatId}
+        retreatTitle={retreatTitle}
+        initialConfig={effectiveChecklist}
+        onSaved={(nextConfig) => {
+          onChecklistConfigUpdated?.(nextConfig);
+        }}
+      />
     </div>
   );
 }

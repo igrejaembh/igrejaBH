@@ -41,6 +41,9 @@ import {
   RotateCcw,
   AlertTriangle,
   Clock,
+  ListChecks,
+  Square,
+  Loader2,
 } from "lucide-react";
 import {
   SERVICE_TEAMS,
@@ -50,8 +53,14 @@ import {
 import supabase from "@/lib/supabase";
 import { toast } from "sonner";
 import { formatTimeBR } from "@/lib/utils";
-import type { Database } from "@/lib/database.types";
-import { THEME_CLASSES } from "@/constants/colors";
+import type { Database, Json } from "@/lib/database.types";
+import { CHECKIN_FLAG_CLASSES, THEME_CLASSES } from "@/constants/colors";
+import {
+  DEFAULT_CHECKIN_CHECKLIST,
+  parseCheckinFlags,
+  type CheckinChecklistItem,
+  type CheckinFlagsMap,
+} from "@/lib/checkinFlags";
 
 export type RegistrationWithDetails = Database["public"]["Tables"]["registrations"]["Row"] & {
   profiles?: {
@@ -94,6 +103,11 @@ interface RegistrationDetailDialogProps {
     cancellationReason?: string
   ) => Promise<void> | void;
   availableSpots?: number;
+  checklistConfig?: CheckinChecklistItem[];
+  onUpdateCheckinFlags?: (
+    regId: string,
+    flags: CheckinFlagsMap
+  ) => Promise<void> | void;
 }
 
 export function RegistrationDetailDialog({
@@ -105,6 +119,8 @@ export function RegistrationDetailDialog({
   onUpdateServiceTeam,
   onUpdateStatus,
   availableSpots,
+  checklistConfig,
+  onUpdateCheckinFlags,
 }: RegistrationDetailDialogProps) {
   const [isEditingPayment, setIsEditingPayment] = useState(false);
   const [editMethod, setEditMethod] = useState("cupom");
@@ -116,6 +132,10 @@ export function RegistrationDetailDialog({
   const [selectedTeam, setSelectedTeam] = useState<string>("none");
   const [isSavingTeam, setIsSavingTeam] = useState(false);
   const [currentTeamState, setCurrentTeamState] = useState<string | null>(null);
+
+  // Check-in control flags state
+  const [localFlags, setLocalFlags] = useState<CheckinFlagsMap>({});
+  const [savingFlagKey, setSavingFlagKey] = useState<string | null>(null);
 
   // Status & cancellation state
   const [isCancelling, setIsCancelling] = useState(false);
@@ -133,6 +153,9 @@ export function RegistrationDetailDialog({
       setSelectedTeam(team || "none");
       setIsEditingTeam(false);
 
+      setLocalFlags(parseCheckinFlags(registration.checkin_flags));
+      setSavingFlagKey(null);
+
       setIsCancelling(false);
       setCancelReason("");
     }
@@ -143,6 +166,35 @@ export function RegistrationDetailDialog({
   const currentStatus = registration.status || "confirmado";
   const isCancelled = currentStatus === "cancelado";
   const isPresent = currentStatus === "presente";
+  const effectiveChecklist =
+    checklistConfig !== undefined ? checklistConfig : DEFAULT_CHECKIN_CHECKLIST;
+
+  const handleToggleControlFlag = async (flagKey: string) => {
+    if (savingFlagKey || isCancelled) return;
+    const nextFlags: CheckinFlagsMap = {
+      ...localFlags,
+      [flagKey]: !localFlags[flagKey],
+    };
+    setSavingFlagKey(flagKey);
+    try {
+      if (onUpdateCheckinFlags) {
+        await onUpdateCheckinFlags(registration.id, nextFlags);
+      } else {
+        const { error } = await supabase
+          .from("registrations")
+          .update({ checkin_flags: nextFlags as unknown as Json })
+          .eq("id", registration.id);
+        if (error) throw error;
+      }
+      setLocalFlags(nextFlags);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Erro ao salvar item da checklist";
+      toast.error(msg);
+    } finally {
+      setSavingFlagKey(null);
+    }
+  };
 
   const handleConfirmCancel = async () => {
     if (!onUpdateStatus) return;
@@ -661,6 +713,47 @@ export function RegistrationDetailDialog({
               )}
             </div>
           </div>
+
+          {/* Seção Checklist de Portaria / Controle */}
+          {effectiveChecklist.length > 0 && (
+            <>
+              <Separator className="bg-border/50" />
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <ListChecks className="w-3.5 h-3.5 text-primary" /> Checklist de Portaria / Controle
+                </h4>
+                <div className="flex flex-wrap gap-2 bg-muted/20 border border-border/40 p-4 rounded-xl">
+                  {effectiveChecklist.map((item) => {
+                    const checked = Boolean(localFlags[item.key]);
+                    const isSavingThis = savingFlagKey === item.key;
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        disabled={Boolean(savingFlagKey) || isCancelled}
+                        onClick={() => void handleToggleControlFlag(item.key)}
+                        aria-pressed={checked}
+                        className={`min-h-[44px] px-3.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
+                          checked
+                            ? CHECKIN_FLAG_CLASSES.checked
+                            : CHECKIN_FLAG_CLASSES.unchecked
+                        }`}
+                      >
+                        {isSavingThis ? (
+                          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        ) : checked ? (
+                          <Check className="w-4 h-4 shrink-0" />
+                        ) : (
+                          <Square className="w-4 h-4 shrink-0 opacity-70" />
+                        )}
+                        <span>{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Seção Respostas do Formulário */}
           {customResponses && Object.keys(customResponses).length > 0 && (

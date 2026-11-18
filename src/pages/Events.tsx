@@ -65,6 +65,7 @@ import { invalidateCurrentUserProfileCache } from "@/hooks/useCurrentUserProfile
 import { FieldGroup } from "@/components/ui/field"
 import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { EventWaitlistDialog } from "@/components/events/EventWaitlistDialog"
+import { ParticipantQrBadgeDialog } from "@/components/events/ParticipantQrBadge"
 
 type Retreat = Database["public"]["Tables"]["retreats"]["Row"]
 
@@ -143,6 +144,9 @@ export default function Events() {
   const [cancellingRegistration, setCancellingRegistration] = useState<Registration | null>(null)
   const [cancellationReason, setCancellationReason] = useState("")
   const [isSubmittingCancellation, setIsSubmittingCancellation] = useState(false)
+
+  // Digital QR Badge Dialog State
+  const [badgeDialogRegistration, setBadgeDialogRegistration] = useState<Registration | null>(null)
 
   const handleOpenCancelDialog = (reg: Registration) => {
     setCancellingRegistration(reg)
@@ -1532,15 +1536,27 @@ export default function Events() {
                       )}
                     </div>
                     {!isCancelled && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenCancelDialog(reg)}
-                        className="min-h-[44px] h-9 px-3 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-500/10 dark:text-red-400 cursor-pointer self-end sm:self-auto shrink-0"
-                      >
-                        Cancelar Inscrição
-                      </Button>
+                      <div className="flex flex-wrap items-center justify-end gap-2 self-end sm:self-auto shrink-0">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setBadgeDialogRegistration(reg)}
+                          className="min-h-[44px] h-11 px-3 text-xs font-semibold cursor-pointer"
+                        >
+                          <QrCode className="h-4 w-4 mr-1.5" />
+                          <span>Meu Crachá</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleOpenCancelDialog(reg)}
+                          className="min-h-[44px] h-11 px-3 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-500/10 dark:text-red-400 cursor-pointer"
+                        >
+                          Cancelar Inscrição
+                        </Button>
+                      </div>
                     )}
                   </CardFooter>
                 </Card>
@@ -1746,6 +1762,19 @@ export default function Events() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal Dialog para Crachá Digital com QR Code */}
+      <ParticipantQrBadgeDialog
+        isOpen={!!badgeDialogRegistration}
+        onClose={() => setBadgeDialogRegistration(null)}
+        registration={badgeDialogRegistration}
+        participantName={
+          (badgeDialogRegistration?.guest_data as { full_name?: string } | null)
+            ?.full_name ||
+          userProfile?.full_name ||
+          "Discípulo"
+        }
+      />
 
       {/* Modal Dialog para Inscrição na Lista de Espera */}
       <EventWaitlistDialog
