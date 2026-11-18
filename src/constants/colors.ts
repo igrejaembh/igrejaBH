@@ -465,6 +465,63 @@ export const BATCH_STATUS_CONFIG = {
   },
 } as const;
 
+export type RefundStatus =
+  | "pendente"
+  | "em_analise"
+  | "aprovado"
+  | "recusado"
+  | "reembolsado";
+
+export const REFUND_STATUS_CONFIG: Record<
+  RefundStatus,
+  {
+    label: string;
+    className: string;
+    color: { light: string; dark: string };
+  }
+> = {
+  pendente: {
+    label: "Pendente",
+    className:
+      "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-800 border border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30",
+    color: STATUS_COLORS.warning,
+  },
+  em_analise: {
+    label: "Em Análise",
+    className:
+      "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/15 text-blue-800 border border-blue-500/30 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30",
+    color: STATUS_COLORS.info,
+  },
+  aprovado: {
+    label: "Aprovado",
+    className:
+      "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-800 border border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30",
+    color: STATUS_COLORS.success,
+  },
+  recusado: {
+    label: "Recusado",
+    className:
+      "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/15 text-red-800 border border-red-500/30 dark:bg-red-500/15 dark:text-red-300 dark:border-red-500/30",
+    color: STATUS_COLORS.destructive,
+  },
+  reembolsado: {
+    label: "Reembolsado",
+    className:
+      "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/15 text-primary border border-primary/30",
+    color: {
+      light: BRAND_COLORS.primary.light.hex,
+      dark: BRAND_COLORS.primary.dark.hex,
+    },
+  },
+} as const;
+
+export const PORTAL_MESSAGE_CLASSES = {
+  participantBubble:
+    "border border-primary/25 bg-primary/10 text-foreground",
+  organizerBubble:
+    "border border-border bg-muted/60 text-foreground",
+  unreadDot: "bg-amber-600 dark:bg-amber-400",
+} as const;
 // ==========================================
 // 7. PALETA DE CORES PARA EQUIPES DE SERVIÇO (Voluntariado / Diaconato)
 // ==========================================

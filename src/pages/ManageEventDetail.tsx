@@ -23,6 +23,7 @@ import {
   Bell,
   Info,
   Layers,
+  MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
@@ -70,6 +71,7 @@ import { EventCouponsTab } from "@/components/events/EventCouponsTab";
 import { EventCheckInTab } from "@/components/events/EventCheckInTab";
 import { EventWaitlistTab } from "@/components/events/EventWaitlistTab";
 import { EventAnnouncementsTab } from "@/components/events/EventAnnouncementsTab";
+import { EventParticipantPortalTab } from "@/components/events/EventParticipantPortalTab";
 import {
   EventFinanceTab,
 } from "@/components/events/EventFinanceTab";
@@ -136,9 +138,11 @@ export default function ManageEventDetail() {
     | "coupons"
     | "waitlist"
     | "announcements"
+    | "portal"
     | "dashboard"
   >("registrations");
   const [waitlistCount, setWaitlistCount] = useState<number>(0);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
 
   // Dialog & Modal states
   const [isEditEventOpen, setIsEditEventOpen] = useState(false);
@@ -483,6 +487,23 @@ export default function ManageEventDetail() {
     }
   }, []);
 
+  const fetchUnreadMessagesCount = useCallback(async (id: string) => {
+    try {
+      const { count, error } = await supabase
+        .from("retreat_participant_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("retreat_id", id)
+        .eq("sender_role", "participant")
+        .is("read_at", null);
+
+      if (!error && count !== null) {
+        setUnreadMessagesCount(count);
+      }
+    } catch (err: unknown) {
+      console.warn("Erro ao buscar mensagens não lidas do portal:", err);
+    }
+  }, []);
+
   useEffect(() => {
     if (eventId) {
       fetchRetreatDetails(eventId);
@@ -492,6 +513,7 @@ export default function ManageEventDetail() {
       fetchForms();
       fetchHomeGroups();
       fetchWaitlistCount(eventId);
+      fetchUnreadMessagesCount(eventId);
     }
   }, [
     eventId,
@@ -502,6 +524,7 @@ export default function ManageEventDetail() {
     fetchForms,
     fetchHomeGroups,
     fetchWaitlistCount,
+    fetchUnreadMessagesCount,
   ]);
 
   // Toggle Payment Status
@@ -1276,6 +1299,16 @@ export default function ManageEventDetail() {
     return registrations.filter((r) => !!r.service_team).length;
   }, [registrations]);
 
+  const pendingRefundsCount = useMemo(() => {
+    return registrations.filter(
+      (r) =>
+        r.refund_requested &&
+        (r.refund_status === "pendente" || r.refund_status === "em_analise")
+    ).length;
+  }, [registrations]);
+
+  const portalAttentionBadge = unreadMessagesCount + pendingRefundsCount;
+
   if (loadingRetreat) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-zinc-500">
@@ -1589,6 +1622,20 @@ export default function ManageEventDetail() {
         </button>
 
         <button
+          onClick={() => setActiveTab("portal")}
+          className={`min-h-[44px] px-4 py-2.5 text-xs font-bold transition-all border-b-2 whitespace-nowrap cursor-pointer flex items-center gap-2 ${
+            activeTab === "portal"
+              ? "border-primary text-primary"
+              : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-50"
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span>
+            Atendimento & Voos {portalAttentionBadge > 0 ? `(${portalAttentionBadge})` : ""}
+          </span>
+        </button>
+
+        <button
           onClick={() => setActiveTab("dashboard")}
           className={`min-h-[44px] px-4 py-2.5 text-xs font-bold transition-all border-b-2 whitespace-nowrap cursor-pointer flex items-center gap-2 ${
             activeTab === "dashboard"
@@ -1868,6 +1915,21 @@ export default function ManageEventDetail() {
       {/* Tab 7: Comunicados & Avisos do Evento */}
       {activeTab === "announcements" && retreat && (
         <EventAnnouncementsTab retreat={retreat} />
+      )}
+
+      {/* Tab 8: Atendimento ao Inscrito, Reembolsos & Voos */}
+      {activeTab === "portal" && retreat && (
+        <EventParticipantPortalTab
+          retreat={retreat}
+          registrations={registrations}
+          onRefreshRegistrations={() => {
+            if (eventId) fetchRegistrations(eventId);
+          }}
+          onViewDetails={(reg) => setSelectedRegistrationForDetail(reg)}
+          onAttentionCountChange={(total) => {
+            setUnreadMessagesCount(Math.max(0, total - pendingRefundsCount));
+          }}
+        />
       )}
 
       {/* Modal: Alocar Quarto para Inscrito Específico */}

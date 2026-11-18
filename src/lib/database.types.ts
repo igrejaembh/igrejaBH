@@ -596,6 +596,7 @@ export type Database = {
           checkin_flags: Json
           created_at: string | null
           custom_responses: Json | null
+          flight_details: Json | null
           form_submission_id: string | null
           guest_data: Json | null
           id: string
@@ -603,8 +604,21 @@ export type Database = {
           paid: boolean | null
           payment_method: string | null
           payment_reference: string | null
+          portal_token: string
           profile_id: string | null
           qr_token: string
+          refund_notes: string | null
+          refund_pix_key: string | null
+          refund_requested: boolean
+          refund_requested_at: string | null
+          refund_resolved_at: string | null
+          refund_status:
+            | "pendente"
+            | "em_analise"
+            | "aprovado"
+            | "recusado"
+            | "reembolsado"
+            | null
           retreat_id: string | null
           room_allocation: string | null
           room_id: string | null
@@ -621,6 +635,7 @@ export type Database = {
           checkin_flags?: Json
           created_at?: string | null
           custom_responses?: Json | null
+          flight_details?: Json | null
           form_submission_id?: string | null
           guest_data?: Json | null
           id?: string
@@ -628,8 +643,21 @@ export type Database = {
           paid?: boolean | null
           payment_method?: string | null
           payment_reference?: string | null
+          portal_token?: string
           profile_id?: string | null
           qr_token?: string
+          refund_notes?: string | null
+          refund_pix_key?: string | null
+          refund_requested?: boolean
+          refund_requested_at?: string | null
+          refund_resolved_at?: string | null
+          refund_status?:
+            | "pendente"
+            | "em_analise"
+            | "aprovado"
+            | "recusado"
+            | "reembolsado"
+            | null
           retreat_id?: string | null
           room_allocation?: string | null
           room_id?: string | null
@@ -646,6 +674,7 @@ export type Database = {
           checkin_flags?: Json
           created_at?: string | null
           custom_responses?: Json | null
+          flight_details?: Json | null
           form_submission_id?: string | null
           guest_data?: Json | null
           id?: string
@@ -653,8 +682,21 @@ export type Database = {
           paid?: boolean | null
           payment_method?: string | null
           payment_reference?: string | null
+          portal_token?: string
           profile_id?: string | null
           qr_token?: string
+          refund_notes?: string | null
+          refund_pix_key?: string | null
+          refund_requested?: boolean
+          refund_requested_at?: string | null
+          refund_resolved_at?: string | null
+          refund_status?:
+            | "pendente"
+            | "em_analise"
+            | "aprovado"
+            | "recusado"
+            | "reembolsado"
+            | null
           retreat_id?: string | null
           room_allocation?: string | null
           room_id?: string | null
@@ -855,6 +897,64 @@ export type Database = {
             columns: ["retreat_id"]
             isOneToOne: false
             referencedRelation: "retreats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retreat_participant_messages: {
+        Row: {
+          created_at: string
+          id: string
+          message: string
+          read_at: string | null
+          registration_id: string
+          retreat_id: string
+          sender_name: string
+          sender_profile_id: string | null
+          sender_role: "participant" | "organizer"
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message: string
+          read_at?: string | null
+          registration_id: string
+          retreat_id: string
+          sender_name: string
+          sender_profile_id?: string | null
+          sender_role: "participant" | "organizer"
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string
+          read_at?: string | null
+          registration_id?: string
+          retreat_id?: string
+          sender_name?: string
+          sender_profile_id?: string | null
+          sender_role?: "participant" | "organizer"
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retreat_participant_messages_registration_id_fkey"
+            columns: ["registration_id"]
+            isOneToOne: false
+            referencedRelation: "registrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retreat_participant_messages_retreat_id_fkey"
+            columns: ["retreat_id"]
+            isOneToOne: false
+            referencedRelation: "retreats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retreat_participant_messages_sender_profile_id_fkey"
+            columns: ["sender_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -1176,6 +1276,16 @@ export type Database = {
           retreat_id: string
         }[]
       }
+      cancel_and_request_refund: {
+        Args: {
+          p_pix_key?: string | null
+          p_portal_token?: string | null
+          p_reason?: string | null
+          p_registration_id?: string | null
+          p_request_refund?: boolean
+        }
+        Returns: Json
+      }
       check_cpf_registration: {
         Args: { p_cpf: string }
         Returns: {
@@ -1211,6 +1321,13 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: number
       }
+      get_participant_portal_data: {
+        Args: {
+          p_portal_token?: string | null
+          p_registration_id?: string | null
+        }
+        Returns: Json
+      }
       patch_retreat_sheet_metadata: {
         Args: { p_metadata: Json; p_retreat_id: string; p_sheet_name: string }
         Returns: undefined
@@ -1232,6 +1349,22 @@ export type Database = {
           p_retreat_id?: string
           p_user_email?: string
           p_user_name?: string
+        }
+        Returns: Json
+      }
+      send_participant_portal_message: {
+        Args: {
+          p_message: string
+          p_portal_token?: string | null
+          p_registration_id?: string | null
+        }
+        Returns: Json
+      }
+      update_participant_flight_details: {
+        Args: {
+          p_flight_details: Json
+          p_portal_token?: string | null
+          p_registration_id?: string | null
         }
         Returns: Json
       }

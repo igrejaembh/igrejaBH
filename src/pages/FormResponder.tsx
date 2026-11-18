@@ -14,6 +14,9 @@ import {
   UserPlus,
   Clock,
   Layers,
+  Copy,
+  Check,
+  ExternalLink,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -54,6 +57,7 @@ import {
   isRetreatExpiredByDate,
   syncExpiredRetreats,
 } from "@/lib/retreatStatus"
+import {
   buildBatchCountsMapFromRpcRows,
   formatBatchDateTime,
   formatBatchPriceLabel,
@@ -64,24 +68,9 @@ import {
   type RetreatBatch,
 } from "@/lib/retreatBatches"
 import { BATCH_STATUS_CONFIG } from "@/constants/colors"
+import { generatePortalToken } from "@/lib/participantPortal"
 import type { User } from "@supabase/supabase-js"
-import type { Database, Json } from "@/lib/database.types"
-
-type AssociatedRetreatInfo = Pick<
-  Database["public"]["Tables"]["retreats"]["Row"],
-  | "id"
-  | "title"
-  | "status"
-  | "start_date"
-  | "end_date"
-  | "max_participants"
-  | "registration_deadline"
-  | "price"
-  | "has_payment"
-  | "location_text"
-  | "description"
-  | "image_url"
->
+import type { Json } from "@/lib/database.types"
 
 type ResponderProfile = Pick<
   Database["public"]["Tables"]["profiles"]["Row"],
@@ -229,6 +218,22 @@ function buildAutoFilledFormValues(
   return values
 }
 
+interface AssociatedRetreatInfo {
+  id: string
+  title: string
+  status: string | null
+  start_date: string | null
+  end_date: string | null
+  max_participants: number | null
+  registration_deadline: string | null
+  price: number | null
+  has_payment: boolean | null
+  location_text: string | null
+  description: string | null
+  image_url: string | null
+  [key: string]: unknown
+}
+
 export default function FormResponder() {
   const navigate = useNavigate()
   const { formId } = useParams<{ formId: string }>()
@@ -239,6 +244,8 @@ export default function FormResponder() {
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
+  const [submittedPortalToken, setSubmittedPortalToken] = useState<string | null>(null)
+  const [copiedPortalLink, setCopiedPortalLink] = useState(false)
   const [canPost, setCanPost] = useState(false)
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -1137,17 +1144,14 @@ export default function FormResponder() {
               const isDuplicate = existingRegs.some((reg) => {
                 const regGuestData = reg.guest_data as Record<string, unknown> | null
                 const regCustomResponses = reg.custom_responses as Record<string, unknown> | null
-                // Check profiles email/cpf
-                if (regProfiles) {
-                  if (emailVal && regProfiles.email?.toLowerCase() === emailVal) return true
-                  if (cpfVal && regProfiles.cpf?.replace(/\D/g, "") === cpfVal) return true
+                if (reg.profiles) {
+                  if (emailVal && reg.profiles.email?.toLowerCase() === emailVal) return true
+                  if (cpfVal && reg.profiles.cpf?.replace(/\D/g, "") === cpfVal) return true
                 }
-                // Check guest_data email/cpf
                 if (regGuestData) {
                   if (emailVal && typeof regGuestData.email === "string" && regGuestData.email.toLowerCase() === emailVal) return true
                   if (cpfVal && typeof regGuestData.cpf === "string" && regGuestData.cpf.replace(/\D/g, "") === cpfVal) return true
                 }
-                // Check custom_responses keys/values
                 if (regCustomResponses) {
                   for (const [key, val] of Object.entries(regCustomResponses)) {
                     const label = key.toLowerCase()
@@ -1212,6 +1216,8 @@ export default function FormResponder() {
         })
 
         if (error) throw error
+
+        let createdPortalToken: string | null = null
 
         // If this form is associated with a retreat, create a registration as well!
         if (associatedRetreat) {
@@ -1285,6 +1291,7 @@ export default function FormResponder() {
 
           const teamToStamp =
             assignedServiceTeam || couponValidation.targetServiceTeam || null
+          const portalToken = generatePortalToken()
 
           const { error: regError } = await supabase.from("registrations").insert({
             retreat_id: associatedRetreat.id,
@@ -1296,12 +1303,14 @@ export default function FormResponder() {
             paid: paid,
             service_team: teamToStamp,
             form_submission_id: submissionId,
+            portal_token: portalToken,
             status: "confirmado",
             batch_id: freshActiveBatch ? freshActiveBatch.id : null,
             batch_price_snapshot: freshActiveBatch ? effectiveBasePrice : null,
           })
 
           if (regError) throw regError
+          createdPortalToken = portalToken
 
           // Se o participante veio com link de chamada da lista de espera, marcar como inscrito
           const urlParams = new URLSearchParams(window.location.search)
@@ -1336,6 +1345,7 @@ export default function FormResponder() {
         }
 
         toast.dismiss(submitToastId)
+        setSubmittedPortalToken(createdPortalToken)
         setSubmitted(true)
         toast.success("Resposta enviada com sucesso!")
       } catch (e: unknown) {
@@ -1780,7 +1790,7 @@ export default function FormResponder() {
 
       {/* SUCCESS STATE CARD */}
       {submitted ? (
-        <div className="mx-auto max-w-md animate-in space-y-6 rounded-2xl border border-border/60 bg-card/25 p-6 sm:p-8 text-center shadow-sm duration-300 zoom-in-95">
+        <div className="mx-auto max-w-lg animate-in space-y-6 rounded-2xl border border-border/60 bg-card/25 p-6 sm:p-8 text-center shadow-sm duration-300 zoom-in-95">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-600">
             <CheckCircle2 className="h-8 w-8" />
           </div>
@@ -1789,11 +1799,64 @@ export default function FormResponder() {
             <h2 className="text-2xl font-bold text-foreground">
               Resposta Enviada!
             </h2>
-            <p className="mx-auto max-w-xs text-sm leading-relaxed text-muted-foreground">
+            <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">
               Obrigado por preencher o formulário <strong>{formTemplate.name}</strong>. Suas
               respostas foram registradas com sucesso.
             </p>
           </div>
+
+          {submittedPortalToken && (
+            <div className="rounded-xl border border-border bg-muted/30 p-4 text-left space-y-3">
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-foreground">
+                  Seu Portal do Inscrito está pronto
+                </p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Guarde este link exclusivo para conferir suas respostas, ler comunicados
+                  do evento, enviar dúvidas aos organizadores, informar dados de voo ou
+                  gerenciar sua inscrição.
+                </p>
+              </div>
+
+              <Button
+                asChild
+                className="min-h-[44px] w-full font-semibold"
+              >
+                <Link to={`/inscricao/${submittedPortalToken}`}>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Acessar Área do Inscrito
+                </Link>
+              </Button>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  readOnly
+                  aria-label="Link exclusivo da Área do Inscrito"
+                  value={`${window.location.origin}/inscricao/${submittedPortalToken}`}
+                  className="min-h-[44px] font-mono text-xs bg-background"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={async () => {
+                    const url = `${window.location.origin}/inscricao/${submittedPortalToken}`
+                    await navigator.clipboard.writeText(url)
+                    setCopiedPortalLink(true)
+                    toast.success("Link do Portal do Inscrito copiado!")
+                    setTimeout(() => setCopiedPortalLink(false), 2500)
+                  }}
+                  className="min-h-[44px] shrink-0 font-semibold"
+                >
+                  {copiedPortalLink ? (
+                    <Check className="mr-1.5 h-4 w-4" />
+                  ) : (
+                    <Copy className="mr-1.5 h-4 w-4" />
+                  )}
+                  {copiedPortalLink ? "Copiado" : "Copiar Link"}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {!user && associatedRetreat && (
             <div className="rounded-xl border border-primary/25 bg-primary/5 p-4 text-left space-y-3">

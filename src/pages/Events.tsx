@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react"
+import { Link } from "react-router-dom"
 import supabase from "@/lib/supabase"
 import {
   Calendar,
@@ -17,6 +18,7 @@ import {
   AlertTriangle,
   XCircle,
   Layers,
+  ExternalLink,
 } from "lucide-react"
 import {
   Card,
@@ -55,6 +57,8 @@ import {
 } from "@/lib/forms"
 import type { FormField } from "@/lib/forms"
 import type { Database, Json } from "@/lib/database.types"
+import { REFUND_STATUS_CONFIG } from "@/constants/colors"
+import { generatePortalToken } from "@/lib/participantPortal"
 import { formatDateBR } from "@/lib/utils"
 import { getEffectiveRetreatStatus, syncExpiredRetreats } from "@/lib/retreatStatus"
 import { formatCPF } from "@/lib/cpfUtils"
@@ -667,6 +671,7 @@ export default function Events() {
           notes: notes.trim() || null,
           paid: paid,
           form_submission_id: formSubmissionId,
+          portal_token: generatePortalToken(),
           status: "confirmado" as const,
           batch_id: batchId,
           batch_price_snapshot: batchPriceSnapshot,
@@ -1678,8 +1683,19 @@ export default function Events() {
                         </span>
                       </div>
                     )}
+                    {reg.refund_requested && reg.refund_status && (
+                      <div className="flex items-center justify-between text-[11px] border-t border-border/10 pt-1.5">
+                        <span>Reembolso:</span>
+                        <Badge
+                          variant="outline"
+                          className={REFUND_STATUS_CONFIG[reg.refund_status].className}
+                        >
+                          {REFUND_STATUS_CONFIG[reg.refund_status].label}
+                        </Badge>
+                      </div>
+                    )}
                   </CardContent>
-                  <CardFooter className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-5 pt-3 border-t border-border/10 bg-muted/10">
+                  <CardFooter className="flex flex-col items-stretch gap-3 p-5 pt-3 border-t border-border/10 bg-muted/10">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium">
                       {isCancelled ? (
                         <div className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
@@ -1703,29 +1719,40 @@ export default function Events() {
                         </div>
                       )}
                     </div>
-                    {!isCancelled && (
-                      <div className="flex flex-wrap items-center justify-end gap-2 self-end sm:self-auto shrink-0">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setBadgeDialogRegistration(reg)}
-                          className="min-h-[44px] h-11 px-3 text-xs font-semibold cursor-pointer"
-                        >
-                          <QrCode className="h-4 w-4 mr-1.5" />
-                          <span>Meu Crachá</span>
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenCancelDialog(reg)}
-                          className="min-h-[44px] h-11 px-3 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-500/10 dark:text-red-400 cursor-pointer"
-                        >
-                          Cancelar Inscrição
-                        </Button>
-                      </div>
-                    )}
+                    <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-between gap-2 w-full">
+                      <Button
+                        asChild
+                        className="min-h-[44px] flex-1 font-semibold"
+                      >
+                        <Link to={`/eventos/inscricao/${reg.id}`}>
+                          <ExternalLink data-icon="inline-start" />
+                          Acessar Área do Inscrito
+                        </Link>
+                      </Button>
+                      {!isCancelled && (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setBadgeDialogRegistration(reg)}
+                            className="min-h-[44px] h-11 px-3 text-xs font-semibold cursor-pointer shrink-0"
+                          >
+                            <QrCode className="h-4 w-4 mr-1.5" />
+                            <span>Meu Crachá</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenCancelDialog(reg)}
+                            className="min-h-[44px] px-3 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-500/10 dark:text-red-400 cursor-pointer shrink-0"
+                          >
+                            Cancelar Inscrição
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </CardFooter>
                 </Card>
               )
