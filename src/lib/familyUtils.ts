@@ -22,6 +22,20 @@ export interface FamilyGroup<T extends Profile = Profile> {
   size: number
 }
 
+function isMaleGender(gender?: string | null): boolean {
+  const g = gender?.toLowerCase().trim()
+  return g === "m" || g === "masculino" || g === "homem"
+}
+
+function isFemaleGender(gender?: string | null): boolean {
+  const g = gender?.toLowerCase().trim()
+  return g === "f" || g === "feminino" || g === "mulher"
+}
+
+function compareByName(a: Profile, b: Profile): number {
+  return (a.full_name || "").localeCompare(b.full_name || "", "pt-BR")
+}
+
 /**
  * Constrói as famílias a partir de uma lista de perfis de um Grupo Caseiro
  * utilizando conexões matrimoniais (spouse_id) e de parentesco (father_id, mother_id).
@@ -97,12 +111,14 @@ export function buildFamiliesForProfiles<T extends Profile>(profiles: T[]): Fami
     // "Toda família é identificada por meio de um chefe, o qual é sempre o marido/pai."
     // 1. Homem que é pai de alguém na família
     const fathers = familyMembers.filter(
-      (m) => m.gender === "M" && familyMembers.some((child) => child.father_id === m.id)
+      (m) => isMaleGender(m.gender) && familyMembers.some((child) => child.father_id === m.id)
     )
 
     // 2. Homem casado (marido)
     const husbands = familyMembers.filter(
-      (m) => m.gender === "M" && m.spouse_id && familyMembers.some((s) => s.id === m.spouse_id)
+      (m) =>
+        isMaleGender(m.gender) &&
+        familyMembers.some((s) => s.id !== m.id && (s.id === m.spouse_id || s.spouse_id === m.id))
     )
 
     let head: T
@@ -113,31 +129,35 @@ export function buildFamiliesForProfiles<T extends Profile>(profiles: T[]): Fami
     } else {
       // 3. Família monoparental feminina (mãe com filhos, pai não cadastrado no grupo)
       const mothers = familyMembers.filter(
-        (m) => m.gender === "F" && familyMembers.some((child) => child.mother_id === m.id)
+        (m) => isFemaleGender(m.gender) && familyMembers.some((child) => child.mother_id === m.id)
       )
       if (mothers.length > 0) {
         head = mothers[0]
       } else {
         // 4. Família individual ou sem vínculos diretos de parentesco
         const adultMen = familyMembers.filter(
-          (m) => m.gender === "M" && (!m.father_id || m.is_baptized || !!m.baptism_date)
+          (m) => isMaleGender(m.gender) && (!m.father_id || m.is_baptized || !!m.baptism_date)
         )
         head = adultMen.length > 0 ? adultMen[0] : familyMembers[0]
       }
     }
 
     const isIndividual = familyMembers.length === 1
-    const spouse = head.spouse_id ? profileMap.get(head.spouse_id) : undefined
+    const spouse =
+      (head.spouse_id ? profileMap.get(head.spouse_id) : undefined) ||
+      familyMembers.find((m) => m.id !== head.id && m.spouse_id === head.id)
 
     // Filhos da família: membros que apontam para o chefe ou para o cônjuge como pais
-    const children = familyMembers.filter(
-      (m) =>
-        m.id !== head.id &&
-        (!spouse || m.id !== spouse.id) &&
-        (m.father_id === head.id ||
-          m.mother_id === head.id ||
-          (spouse && (m.father_id === spouse.id || m.mother_id === spouse.id)))
-    )
+    const children = familyMembers
+      .filter(
+        (m) =>
+          m.id !== head.id &&
+          (!spouse || m.id !== spouse.id) &&
+          (m.father_id === head.id ||
+            m.mother_id === head.id ||
+            (spouse && (m.father_id === spouse.id || m.mother_id === spouse.id)))
+      )
+      .sort(compareByName)
 
     // Montar papéis dos membros
     const membersWithRole: FamilyMemberInfo<T>[] = familyMembers.map((m) => {
@@ -149,13 +169,13 @@ export function buildFamiliesForProfiles<T extends Profile>(profiles: T[]): Fami
         roleLabel = "Solteiro"
       } else if (m.id === head.id) {
         role = "chefe"
-        roleLabel = head.gender === "F" ? "Responsável do Lar" : "Chefe da Família"
+        roleLabel = isFemaleGender(head.gender) ? "Responsável do Lar" : "Chefe da Família"
       } else if (spouse && m.id === spouse.id) {
-        role = m.gender === "M" ? "marido" : "esposa"
-        roleLabel = m.gender === "M" ? "Esposo" : "Esposa"
+        role = isMaleGender(m.gender) ? "marido" : "esposa"
+        roleLabel = isMaleGender(m.gender) ? "Esposo" : "Esposa"
       } else if (children.some((c) => c.id === m.id)) {
         role = "filho"
-        roleLabel = m.gender === "F" ? "Filha" : "Filho"
+        roleLabel = isFemaleGender(m.gender) ? "Filha" : "Filho"
       } else {
         role = "individual"
         roleLabel = "Familiar"
@@ -163,6 +183,41 @@ export function buildFamiliesForProfiles<T extends Profile>(profiles: T[]): Fami
 
       return { profile: m, role, roleLabel }
     })
+
+    // Ordenação interna da família: marido (pai), esposa (mãe) e filhos em ordem alfabética
+    const getMemberSortRank = (info: FamilyMemberInfo<T>): number => {
+      const p = info.profile
+      if (
+        info.role === "marido" ||
+        (info.role === "chefe" && !isFemaleGender(p.gender)) ||
+        (info.role !== "filho" &&
+          isMaleGender(p.gender) &&
+          familyMembers.some((child) => child.father_id === p.id))
+      ) {
+        return 0
+      }
+      if (
+        info.role === "esposa" ||
+        (info.role === "chefe" && isFemaleGender(p.gender)) ||
+        (info.role !== "filho" &&
+          isFemaleGender(p.gender) &&
+          familyMembers.some((child) => child.mother_id === p.id))
+      ) {
+        return 1
+      }
+      if (info.role === "filho") {
+        return 2
+      }
+      return 3
+    }
+
+    membersWithRole.sort((a, b) => {
+      const rankDiff = getMemberSortRank(a) - getMemberSortRank(b)
+      if (rankDiff !== 0) return rankDiff
+      return compareByName(a.profile, b.profile)
+    })
+
+    const sortedMembers = membersWithRole.map((info) => info.profile)
 
     const familyName = isIndividual
       ? `${head.full_name} (Solteiro)`
@@ -173,11 +228,11 @@ export function buildFamiliesForProfiles<T extends Profile>(profiles: T[]): Fami
       head,
       name: familyName,
       isIndividual,
-      members: familyMembers,
+      members: sortedMembers,
       membersWithRole,
       spouse,
       children,
-      size: familyMembers.length,
+      size: sortedMembers.length,
     })
   })
 
