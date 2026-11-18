@@ -9,6 +9,16 @@ import { ensureMandatoryEventFields, type FormField } from "@/lib/forms";
 import { GRAPH_UI_CLASSES, THEME_CLASSES } from "@/constants/colors";
 import { isRetreatAutoClosed, isRetreatExpiredByDate } from "@/lib/retreatStatus";
 import {
+  buildBatchCountsMapFromRpcRows,
+  toDateTimeLocalInput,
+  validateBatchWindows,
+  type BatchDraft,
+  type BatchFieldErrors,
+  type RetreatBatch,
+} from "@/lib/retreatBatches";
+import { syncRetreatBatches } from "@/lib/retreatBatchesSync";
+import { RetreatBatchesSection } from "@/components/events/RetreatBatchesSection";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -92,6 +102,12 @@ export function CreateEditEventDialog({
   onSuccess,
 }: CreateEditEventDialogProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [batchDrafts, setBatchDrafts] = useState<BatchDraft[]>([]);
+  const [originalBatches, setOriginalBatches] = useState<RetreatBatch[]>([]);
+  const [batchCounts, setBatchCounts] = useState<Record<string, number>>({});
+  const [loadingBatches, setLoadingBatches] = useState(false);
+  const [batchFieldErrors, setBatchFieldErrors] = useState<Record<number, BatchFieldErrors>>({});
+  const [batchValidationErrors, setBatchValidationErrors] = useState<string[]>([]);
 
   const { control, handleSubmit, reset, setValue, watch, setError, clearErrors } = useForm<RetreatFormValues>({
     resolver: zodResolver(retreatFormSchema) as Resolver<RetreatFormValues>,
@@ -112,6 +128,7 @@ export function CreateEditEventDialog({
   });
 
   const hasPayment = watch("has_payment");
+  const defaultPriceValue = watch("price");
   const watchedEndDate = watch("end_date");
   const watchedStatus = watch("status");
   const isEndDateInPast = isRetreatExpiredByDate(watchedEndDate);
@@ -127,6 +144,51 @@ export function CreateEditEventDialog({
   }, [isAttemptingActivePastRetreat, clearErrors]);
 
   useEffect(() => {
+    let active = true;
+
+    async function loadBatches(retreatId: string) {
+      setLoadingBatches(true);
+      try {
+        const [{ data: batchesData, error: batchesErr }, { data: countsData }] =
+          await Promise.all([
+            supabase
+              .from("retreat_batches")
+              .select("*")
+              .eq("retreat_id", retreatId)
+              .order("sort_order", { ascending: true })
+              .order("start_at", { ascending: true }),
+            supabase.rpc("get_retreat_batch_counts", {
+              p_retreat_ids: [retreatId],
+            }),
+          ]);
+
+        if (!active) return;
+        if (batchesErr) throw batchesErr;
+
+        const rows = batchesData || [];
+        setOriginalBatches(rows);
+        setBatchDrafts(
+          rows.map((b, idx) => ({
+            id: b.id,
+            name: b.name,
+            price: Number(b.price),
+            start_at: toDateTimeLocalInput(b.start_at),
+            end_at: toDateTimeLocalInput(b.end_at),
+            max_spots: b.max_spots,
+            sort_order: b.sort_order ?? idx,
+          }))
+        );
+        setBatchCounts(buildBatchCountsMapFromRpcRows(countsData || []));
+      } catch (err: unknown) {
+        console.error("Erro ao carregar lotes do evento:", err);
+      } finally {
+        if (active) setLoadingBatches(false);
+      }
+    }
+
+    setBatchFieldErrors({});
+    setBatchValidationErrors([]);
+
     if (retreat) {
       setValue("title", retreat.title);
       setValue("description", retreat.description || "");
@@ -149,6 +211,9 @@ export function CreateEditEventDialog({
         "checkin_checklist_config",
         parseChecklistConfig(retreat.checkin_checklist_config)
       );
+      if (isOpen) {
+        loadBatches(retreat.id);
+      }
     } else {
       reset({
         title: "",
@@ -164,8 +229,28 @@ export function CreateEditEventDialog({
         registration_deadline: "",
         checkin_checklist_config: [...DEFAULT_CHECKIN_CHECKLIST],
       });
+      setOriginalBatches([]);
+      setBatchDrafts([]);
+      setBatchCounts({});
     }
+
+    return () => {
+      active = false;
+    };
   }, [retreat, isOpen, setValue, reset]);
+
+  const handleBatchesChange = (nextBatches: BatchDraft[]) => {
+    setBatchDrafts(nextBatches);
+    if (batchValidationErrors.length > 0 || Object.keys(batchFieldErrors).length > 0) {
+      const normalized = nextBatches.map((b) => ({
+        ...b,
+        price: hasPayment ? b.price : 0,
+      }));
+      const result = validateBatchWindows(normalized);
+      setBatchFieldErrors(result.fieldErrors);
+      setBatchValidationErrors(result.errors);
+    }
+  };
 
   const onSubmitEvent = async (data: RetreatFormValues) => {
     if (data.status === "ativo" && isRetreatExpiredByDate(data.end_date)) {
@@ -181,6 +266,24 @@ export function CreateEditEventDialog({
     }
 
     setSubmitting(true);
+
+    if (batchDrafts.length > 0) {
+      const normalized = batchDrafts.map((b) => ({
+        ...b,
+        price: data.has_payment ? b.price : 0,
+      }));
+      const validation = validateBatchWindows(normalized);
+      if (!validation.valid) {
+        setBatchFieldErrors(validation.fieldErrors);
+        setBatchValidationErrors(validation.errors);
+        toast.error("Revise as janelas e os valores dos lotes antes de salvar.");
+        setSubmitting(false);
+        return;
+      }
+    }
+    setBatchFieldErrors({});
+    setBatchValidationErrors([]);
+
     const payload = {
       title: data.title,
       description: data.description || null,
@@ -239,6 +342,7 @@ export function CreateEditEventDialog({
     }
 
     try {
+      let savedRetreatId: string;
       if (retreat) {
         const { error } = await supabase
           .from("retreats")
@@ -246,13 +350,28 @@ export function CreateEditEventDialog({
           .eq("id", retreat.id);
 
         if (error) throw error;
-        toast.success("Evento atualizado com sucesso!");
+        savedRetreatId = retreat.id;
       } else {
-        const { error } = await supabase.from("retreats").insert([payload]);
+        const { data: insertedRetreat, error } = await supabase
+          .from("retreats")
+          .insert([payload])
+          .select("id")
+          .single();
 
         if (error) throw error;
-        toast.success("Evento criado com sucesso!");
+        savedRetreatId = insertedRetreat.id;
       }
+
+      if (batchDrafts.length > 0 || originalBatches.length > 0) {
+        await syncRetreatBatches(
+          savedRetreatId,
+          batchDrafts,
+          originalBatches,
+          data.has_payment
+        );
+      }
+
+      toast.success(retreat ? "Evento atualizado com sucesso!" : "Evento criado com sucesso!");
 
       onOpenChange(false);
       reset();
@@ -470,13 +589,26 @@ export function CreateEditEventDialog({
                     className="rounded-md min-h-[44px]"
                   />
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                    Opcional. Data final (até as 23:59) para recebimento de inscrições. Se deixado em branco, o prazo limite será a Data de Término do evento.
+                    {batchDrafts.length > 0
+                      ? "Com lotes configurados abaixo, a abertura e o encerramento das inscrições seguem automaticamente as janelas dos lotes."
+                      : "Opcional. Data final (até as 23:59) para recebimento de inscrições. Se deixado em branco, o prazo limite será a Data de Término do evento."}
                   </p>
                   {fieldState.error && <FieldError>{fieldState.error.message}</FieldError>}
                 </>
               )}
             />
           </Field>
+
+          <RetreatBatchesSection
+            batches={batchDrafts}
+            onChange={handleBatchesChange}
+            hasPayment={hasPayment}
+            defaultPrice={Number(defaultPriceValue || 0)}
+            batchCounts={batchCounts}
+            fieldErrors={batchFieldErrors}
+            validationErrors={batchValidationErrors}
+            disabled={submitting || loadingBatches}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field>

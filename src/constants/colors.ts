@@ -419,6 +419,52 @@ export const WAITLIST_STATUS_CONFIG = {
   },
 } as const;
 
+export const BATCH_STATUS_CONFIG = {
+  active: {
+    label: "Lote Aberto",
+    badgeClass:
+      "bg-emerald-500/10 text-emerald-800 border-emerald-600/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-400/30",
+    alertClass:
+      "border-emerald-600/30 bg-emerald-500/10 text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-300",
+    color: STATUS_COLORS.success,
+  },
+  upcoming: {
+    label: "Em Breve",
+    badgeClass:
+      "bg-sky-500/10 text-sky-800 border-sky-600/30 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-400/30",
+    alertClass:
+      "border-sky-600/30 bg-sky-500/10 text-sky-800 dark:border-sky-400/30 dark:bg-sky-500/15 dark:text-sky-300",
+    color: STATUS_COLORS.info,
+  },
+  between: {
+    label: "Aguardando Próximo Lote",
+    badgeClass:
+      "bg-amber-500/10 text-amber-800 border-amber-600/30 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-400/30",
+    alertClass:
+      "border-amber-600/30 bg-amber-500/10 text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/15 dark:text-amber-300",
+    color: STATUS_COLORS.warning,
+  },
+  full: {
+    label: "Lote Esgotado",
+    badgeClass:
+      "bg-red-500/10 text-red-800 border-red-600/30 dark:bg-red-500/15 dark:text-red-300 dark:border-red-400/30",
+    alertClass:
+      "border-red-600/30 bg-red-500/10 text-red-800 dark:border-red-400/30 dark:bg-red-500/15 dark:text-red-300",
+    color: STATUS_COLORS.destructive,
+  },
+  ended: {
+    label: "Encerrado",
+    badgeClass:
+      "bg-zinc-500/10 text-zinc-700 border-zinc-500/30 dark:bg-zinc-400/10 dark:text-zinc-300 dark:border-zinc-400/30",
+    alertClass:
+      "border-zinc-500/30 bg-zinc-500/10 text-zinc-700 dark:border-zinc-400/30 dark:bg-zinc-400/10 dark:text-zinc-300",
+    color: {
+      light: PALETTE.zinc[700],
+      dark: PALETTE.zinc[300],
+    },
+  },
+} as const;
+
 // ==========================================
 // 7. PALETA DE CORES PARA EQUIPES DE SERVIÇO (Voluntariado / Diaconato)
 // ==========================================
