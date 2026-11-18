@@ -1,4 +1,4 @@
-import { CornerDownLeft, ArrowLeftRight, Heart, Pencil } from "lucide-react"
+import { CornerDownLeft, ArrowLeftRight, Heart, Pencil, Users } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import type { Database } from "@/lib/database.types"
@@ -12,6 +12,8 @@ export interface DiscipleCardProps {
   isNucleus?: boolean
   disciplerName?: string | null
   spouseName?: string | null
+  fatherName?: string | null
+  motherName?: string | null
   fellowshipNames?: string[]
   onEdit: (disciple: Profile) => void
 }
@@ -32,12 +34,16 @@ export function DiscipleCard({
   isNucleus = false,
   disciplerName,
   spouseName,
+  fatherName,
+  motherName,
   fellowshipNames = [],
   onEdit,
 }: DiscipleCardProps) {
   const hasCompanions = fellowshipNames.length > 0
-  const hasMetadata = Boolean(disciplerName || hasCompanions || spouseName)
-  const hasTags = isLeader || isNucleus
+  const hasRelationshipMetadata = Boolean(disciplerName || hasCompanions || spouseName)
+  const parentsNames = [fatherName, motherName].filter(Boolean).join(" & ")
+  const showParents = !hasRelationshipMetadata && Boolean(parentsNames)
+  const hasMetadata = hasRelationshipMetadata || showParents
 
   return (
     <button
@@ -58,36 +64,32 @@ export function DiscipleCard({
       </Avatar>
 
       <div className="min-w-0 flex-1">
-        {/* b. Nome + ícone discreto de edição */}
+        {/* b. Nome + tags (Líder / Núcleo) + ícone discreto de edição */}
         <div className="flex items-start justify-between gap-2">
-          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug tracking-tight text-foreground sm:text-base">
-            {disciple.full_name}
-          </h3>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            <h3 className="min-w-0 truncate text-sm font-semibold leading-snug tracking-tight text-foreground sm:text-base">
+              {disciple.full_name}
+            </h3>
+            {isLeader && (
+              <Badge variant="outline" className={THEME_CLASSES.badgeGroupLeader}>
+                Líder
+              </Badge>
+            )}
+            {isNucleus && (
+              <Badge variant="outline" className={THEME_CLASSES.badgeGroupNucleus}>
+                Núcleo
+              </Badge>
+            )}
+          </div>
           <Pencil
             aria-hidden="true"
             className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground"
           />
         </div>
 
-        {/* Somente duas tags permitidas: Líder de Grupo Caseiro e Núcleo de Grupo Caseiro */}
-        {hasTags && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {isLeader && (
-              <Badge variant="outline" className={THEME_CLASSES.badgeGroupLeader}>
-                Líder de Grupo Caseiro
-              </Badge>
-            )}
-            {isNucleus && (
-              <Badge variant="outline" className={THEME_CLASSES.badgeGroupNucleus}>
-                Núcleo de Grupo Caseiro
-              </Badge>
-            )}
-          </div>
-        )}
-
-        {/* c, d, e: Discipulador, Companheiro e Cônjuge em fontes menores e simples */}
+        {/* c, d, e: Discipulador, Companheiro e Cônjuge (ou Pais na ausência destes) */}
         {hasMetadata && (
-          <div className="mt-2 space-y-1 text-xs font-normal text-muted-foreground">
+          <div className="mt-2 flex flex-col gap-1 text-xs font-normal text-muted-foreground">
             {disciplerName && (
               <div className="flex items-center gap-1.5 min-w-0">
                 <CornerDownLeft
@@ -118,6 +120,17 @@ export function DiscipleCard({
                 />
                 <span className="sr-only">Cônjuge: </span>
                 <span className="truncate">{spouseName}</span>
+              </div>
+            )}
+
+            {showParents && (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Users
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-muted-foreground/80"
+                />
+                <span className="sr-only">Pais: </span>
+                <span className="truncate">{parentsNames}</span>
               </div>
             )}
           </div>

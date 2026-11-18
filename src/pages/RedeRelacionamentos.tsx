@@ -542,6 +542,11 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     presbyterIds,
   ])
 
+  const filteredDiscipleIds = useMemo(
+    () => new Set(filteredDisciples.map((d) => d.id)),
+    [filteredDisciples]
+  )
+
   // Contadores para chips de status
   const counts = useMemo(() => {
     const isCoveredRoot = (p: Profile) =>
@@ -633,6 +638,12 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     const spouse = disciple.spouse_id
       ? profileMap.get(disciple.spouse_id)?.full_name
       : null
+    const father = disciple.father_id
+      ? profileMap.get(disciple.father_id)?.full_name
+      : null
+    const mother = disciple.mother_id
+      ? profileMap.get(disciple.mother_id)?.full_name
+      : null
     const companions = fellowshipsByProfile.get(disciple.id) || []
 
     return (
@@ -643,6 +654,8 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         isNucleus={isNucleus}
         disciplerName={discipler}
         spouseName={spouse}
+        fatherName={father}
+        motherName={mother}
         fellowshipNames={companions}
         onEdit={handleOpenEditDisciple}
       />
@@ -1307,8 +1320,8 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                 <div className="space-y-6">
                   {/* 1. Famílias com lares e múltiplos membros */}
                   {actualFamilies.map((fam) => {
-                    const famDisciples = filteredDisciples.filter((d) =>
-                      fam.members.some((m) => m.id === d.id)
+                    const famDisciples = fam.members.filter((m) =>
+                      filteredDiscipleIds.has(m.id)
                     )
                     if (famDisciples.length === 0) return null
 
