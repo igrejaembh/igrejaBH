@@ -108,22 +108,22 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
   // Filtros da lista de irmãos
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>("my_or_all")
   const [selectedFamilyFilter, setSelectedFamilyFilter] = useState<string>("all")
-  const [groupByFamily, setGroupByFamily] = useState<boolean>(false)
+  const [groupByFamily, setGroupByFamily] = useState<boolean>(true)
   const [searchName, setSearchName] = useState<string>("")
   const [filterCategory, setFilterCategory] = useState<
     "all" | "without_discipler" | "children" | "adults"
   >("all")
 
-  // Reseta o filtro de família quando o grupo caseiro selecionado mudar
+  const isWholeChurchView = !singleGroupMode && isTier3 && selectedGroupFilter === "all"
+
+  // Reseta o filtro de família quando sair da visualização da igreja inteira ou mudar o grupo
   useEffect(() => {
     setSelectedFamilyFilter("all")
-  }, [selectedGroupFilter])
+  }, [selectedGroupFilter, isWholeChurchView])
 
   // Modais de Edição
   const [editingDisciple, setEditingDisciple] = useState<Profile | null>(null)
   const [isDiscipleDialogOpen, setIsDiscipleDialogOpen] = useState<boolean>(false)
-  const [transformToBaptizedOnOpen, setTransformToBaptizedOnOpen] = useState<boolean>(false)
-  const [transformToLinkedOnOpen, setTransformToLinkedOnOpen] = useState<boolean>(false)
 
   const [editingHomeGroup, setEditingHomeGroup] = useState<HomeGroup | null>(null)
   const [isHomeGroupDialogOpen, setIsHomeGroupDialogOpen] = useState<boolean>(false)
@@ -510,8 +510,8 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         if (isChild) return false
       }
 
-      // 4. Filtro por Família no Grupo
-      if (selectedFamilyFilter !== "all") {
+      // 4. Filtro por Família (apenas na visualização da igreja inteira)
+      if (isWholeChurchView && selectedFamilyFilter !== "all") {
         if (selectedFamilyFilter === "singles") {
           const famInfo = familyByProfileId.get(p.id)
           if (!famInfo?.family.isIndividual) {
@@ -531,6 +531,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     profiles,
     singleGroupMode,
     isTier3,
+    isWholeChurchView,
     myHomeGroup,
     selectedGroupFilter,
     selectedFamilyFilter,
@@ -581,12 +582,17 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     ]
 
     homeGroups.forEach((hg) => {
-      const count = profiles.filter((p) => p.home_group_id === hg.id).length
+      const groupProfiles = profiles.filter((p) => p.home_group_id === hg.id)
+      const count = groupProfiles.length
       const leaders = getHomeGroupLeadersName(hg, profileMap)
       const displayName = getHomeGroupDisplayName(hg, profileMap)
       const loc = hg.location_text ? hg.location_text.split("-")[0].trim() : ""
       const sector = hg.sector_id ? sectorMap.get(hg.sector_id)?.name : undefined
-      const nucleus = hg.nucleus_name?.trim() || ""
+      const nucleusFromProfiles = groupProfiles
+        .filter((p) => p.is_group_nucleus)
+        .map((p) => p.full_name)
+        .join(", ")
+      const nucleus = nucleusFromProfiles || hg.nucleus_name?.trim() || ""
 
       list.push({
         value: hg.id,
@@ -609,30 +615,38 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
   // Abertura dos modais
   const handleOpenAddDisciple = () => {
     setEditingDisciple(null)
-    setTransformToBaptizedOnOpen(false)
-    setTransformToLinkedOnOpen(false)
     setIsDiscipleDialogOpen(true)
   }
 
   const handleOpenEditDisciple = (disciple: Profile) => {
     setEditingDisciple(disciple)
-    setTransformToBaptizedOnOpen(false)
-    setTransformToLinkedOnOpen(false)
     setIsDiscipleDialogOpen(true)
   }
 
-  const handleOpenTransformBaptism = (disciple: Profile) => {
-    setEditingDisciple(disciple)
-    setTransformToBaptizedOnOpen(true)
-    setTransformToLinkedOnOpen(false)
-    setIsDiscipleDialogOpen(true)
-  }
+  const renderDiscipleCard = (disciple: Profile) => {
+    const isGroupLeader = leaderIds.has(disciple.id)
+    const isNucleus = Boolean(disciple.is_group_nucleus)
+    const registeredDiscipler = disciple.discipler_id
+      ? profileMap.get(disciple.discipler_id)?.full_name
+      : null
+    const discipler = registeredDiscipler || disciple.custom_discipler_name || null
+    const spouse = disciple.spouse_id
+      ? profileMap.get(disciple.spouse_id)?.full_name
+      : null
+    const companions = fellowshipsByProfile.get(disciple.id) || []
 
-  const handleOpenTransformToLinked = (disciple: Profile) => {
-    setEditingDisciple(disciple)
-    setTransformToBaptizedOnOpen(false)
-    setTransformToLinkedOnOpen(true)
-    setIsDiscipleDialogOpen(true)
+    return (
+      <DiscipleCard
+        key={disciple.id}
+        disciple={disciple}
+        isLeader={isGroupLeader}
+        isNucleus={isNucleus}
+        disciplerName={discipler}
+        spouseName={spouse}
+        fellowshipNames={companions}
+        onEdit={handleOpenEditDisciple}
+      />
+    )
   }
 
   const handleOpenEditGroup = (hg: HomeGroup) => {
@@ -1001,14 +1015,28 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                           </span>
                         </div>
 
-                        {currentFocusedGroup.nucleus_name && (
-                          <div className={`flex items-center gap-1.5 font-medium min-w-0 ${THEME_CLASSES.subtitle}`}>
-                            <Layers className="h-3.5 w-3.5 text-primary shrink-0" />
-                            <span className="min-w-0 break-words">
-                              Núcleo: {currentFocusedGroup.nucleus_name}
-                            </span>
-                          </div>
-                        )}
+                        {(() => {
+                          const groupNucleusNames = activeScopeProfiles
+                            .filter(
+                              (p) =>
+                                p.home_group_id === currentFocusedGroup.id &&
+                                p.is_group_nucleus
+                            )
+                            .map((p) => p.full_name)
+                          const nucleusDisplay =
+                            groupNucleusNames.length > 0
+                              ? groupNucleusNames.join(", ")
+                              : currentFocusedGroup.nucleus_name
+                          if (!nucleusDisplay) return null
+                          return (
+                            <div className={`flex items-center gap-1.5 font-medium min-w-0 ${THEME_CLASSES.subtitle}`}>
+                              <Layers className="h-3.5 w-3.5 text-primary shrink-0" />
+                              <span className="min-w-0 break-words">
+                                Núcleo: {nucleusDisplay}
+                              </span>
+                            </div>
+                          )
+                        })()}
 
                         <div className="flex items-center gap-1.5 min-w-0">
                           <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -1071,26 +1099,37 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                 </span>
               </Button>
 
-              {/* Controles de Família do Grupo */}
-              {groupFamilies.length > 0 && (
+              {/* Controles de Família (oculto no /meu-grupo; filtro por família apenas na visualização da igreja inteira) */}
+              {!singleGroupMode && groupFamilies.length > 0 && (
                 <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-card/60 p-3 sm:flex-row sm:items-center sm:justify-between shadow-2xs">
-                  <div className="flex items-center gap-2">
-                    <HomeIcon className="h-4 w-4 text-primary shrink-0" />
-                    <span className="text-xs font-semibold text-foreground">
-                      Filtrar por Família:
-                    </span>
-                  </div>
+                  {isWholeChurchView ? (
+                    <div className="flex items-center gap-2">
+                      <HomeIcon className="h-4 w-4 text-primary shrink-0" />
+                      <span className="text-xs font-semibold text-foreground">
+                        Filtrar por Família:
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <HomeIcon className="h-4 w-4 text-primary shrink-0" />
+                      <span className="text-xs font-semibold text-foreground">
+                        Visualização por Família
+                      </span>
+                    </div>
+                  )}
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2.5 flex-1 sm:justify-end">
-                    <div className="w-full sm:w-72">
-                      <SearchableSelect
-                        options={familyFilterOptions}
-                        value={selectedFamilyFilter}
-                        onValueChange={setSelectedFamilyFilter}
-                        placeholder="Buscar família ou chefe..."
-                        clearable={false}
-                      />
-                    </div>
+                    {isWholeChurchView && (
+                      <div className="w-full sm:w-72">
+                        <SearchableSelect
+                          options={familyFilterOptions}
+                          value={selectedFamilyFilter}
+                          onValueChange={setSelectedFamilyFilter}
+                          placeholder="Buscar família ou chefe..."
+                          clearable={false}
+                        />
+                      </div>
+                    )}
 
                     <Button
                       type="button"
@@ -1111,7 +1150,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
               )}
 
               {/* Banner de Resumo da Família Filtrada */}
-              {selectedFamilyFilter !== "all" && (() => {
+              {isWholeChurchView && selectedFamilyFilter !== "all" && (() => {
                 if (selectedFamilyFilter === "singles") {
                   const singleDisciplesCount = groupFamilies.filter((f) => f.isIndividual).length
                   return (
@@ -1243,12 +1282,12 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                       Nenhum irmão encontrado
                     </h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {searchName || filterCategory !== "all" || selectedFamilyFilter !== "all"
+                      {searchName || filterCategory !== "all" || (isWholeChurchView && selectedFamilyFilter !== "all")
                         ? "Nenhum irmão corresponde aos filtros aplicados."
                         : "Cadastre o primeiro irmão para iniciar o acompanhamento deste grupo."}
                     </p>
                   </div>
-                  {(searchName || filterCategory !== "all" || selectedFamilyFilter !== "all") && (
+                  {(searchName || filterCategory !== "all" || (isWholeChurchView && selectedFamilyFilter !== "all")) && (
                     <Button
                       type="button"
                       variant="outline"
@@ -1263,7 +1302,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                     </Button>
                   )}
                 </div>
-              ) : groupByFamily ? (
+              ) : (singleGroupMode || groupByFamily) ? (
                 /* Modo Agrupado por Famílias */
                 <div className="space-y-6">
                   {/* 1. Famílias com lares e múltiplos membros */}
@@ -1297,59 +1336,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                         </div>
 
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                          {famDisciples.map((disciple) => {
-                            const isGroupLeader = leaderIds.has(disciple.id)
-                            const registeredDiscipler = disciple.discipler_id
-                              ? profileMap.get(disciple.discipler_id)?.full_name
-                              : null
-                            const customDiscipler = disciple.custom_discipler_name || null
-                            const discipler = registeredDiscipler || customDiscipler
-                            const isCustomDiscipler = !registeredDiscipler && Boolean(customDiscipler)
-                            const spouse = disciple.spouse_id
-                              ? profileMap.get(disciple.spouse_id)?.full_name
-                              : null
-                            const father = disciple.father_id
-                              ? profileMap.get(disciple.father_id)?.full_name
-                              : null
-                            const mother = disciple.mother_id
-                              ? profileMap.get(disciple.mother_id)?.full_name
-                              : null
-                            const companions = fellowshipsByProfile.get(disciple.id) || []
-                            const discipleGroup = disciple.home_group_id
-                              ? homeGroups.find((g) => g.id === disciple.home_group_id)
-                              : null
-                            const groupName =
-                              selectedGroupFilter === "all" && discipleGroup
-                                ? getHomeGroupDisplayName(discipleGroup, profileMap)
-                                : null
-
-                            const isCoveredRoot =
-                              !!disciple.is_presbyter || !!(disciple.spouse_id && presbyterIds.has(disciple.spouse_id))
-
-                            const famInfo = familyByProfileId.get(disciple.id)
-
-                            return (
-                              <DiscipleCard
-                                key={disciple.id}
-                                disciple={disciple}
-                                isLeader={isGroupLeader}
-                                disciplerName={discipler}
-                                spouseName={spouse}
-                                fatherName={father}
-                                motherName={mother}
-                                fellowshipNames={companions}
-                                groupName={groupName}
-                                isCoveredRoot={isCoveredRoot}
-                                isCustomDiscipler={isCustomDiscipler}
-                                isFamilyHead={famInfo?.isHead}
-                                familyRoleLabel={famInfo?.roleLabel}
-                                familyName={famInfo?.family.name}
-                                onEdit={handleOpenEditDisciple}
-                                onTransformChild={handleOpenTransformBaptism}
-                                onTransformToLinked={handleOpenTransformToLinked}
-                              />
-                            )
-                          })}
+                          {famDisciples.map((disciple) => renderDiscipleCard(disciple))}
                         </div>
                       </div>
                     )
@@ -1387,57 +1374,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                         </div>
 
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                          {singleDisciples.map((disciple) => {
-                            const isGroupLeader = leaderIds.has(disciple.id)
-                            const registeredDiscipler = disciple.discipler_id
-                              ? profileMap.get(disciple.discipler_id)?.full_name
-                              : null
-                            const customDiscipler = disciple.custom_discipler_name || null
-                            const discipler = registeredDiscipler || customDiscipler
-                            const isCustomDiscipler = !registeredDiscipler && Boolean(customDiscipler)
-                            const spouse = disciple.spouse_id
-                              ? profileMap.get(disciple.spouse_id)?.full_name
-                              : null
-                            const father = disciple.father_id
-                              ? profileMap.get(disciple.father_id)?.full_name
-                              : null
-                            const mother = disciple.mother_id
-                              ? profileMap.get(disciple.mother_id)?.full_name
-                              : null
-                            const companions = fellowshipsByProfile.get(disciple.id) || []
-                            const discipleGroup = disciple.home_group_id
-                              ? homeGroups.find((g) => g.id === disciple.home_group_id)
-                              : null
-                            const groupName =
-                              selectedGroupFilter === "all" && discipleGroup
-                                ? getHomeGroupDisplayName(discipleGroup, profileMap)
-                                : null
-
-                            const isCoveredRoot =
-                              !!disciple.is_presbyter || !!(disciple.spouse_id && presbyterIds.has(disciple.spouse_id))
-
-                            return (
-                              <DiscipleCard
-                                key={disciple.id}
-                                disciple={disciple}
-                                isLeader={isGroupLeader}
-                                disciplerName={discipler}
-                                spouseName={spouse}
-                                fatherName={father}
-                                motherName={mother}
-                                fellowshipNames={companions}
-                                groupName={groupName}
-                                isCoveredRoot={isCoveredRoot}
-                                isCustomDiscipler={isCustomDiscipler}
-                                isFamilyHead={false}
-                                familyRoleLabel={null}
-                                familyName={null}
-                                onEdit={handleOpenEditDisciple}
-                                onTransformChild={handleOpenTransformBaptism}
-                                onTransformToLinked={handleOpenTransformToLinked}
-                              />
-                            )
-                          })}
+                          {singleDisciples.map((disciple) => renderDiscipleCard(disciple))}
                         </div>
                       </div>
                     )
@@ -1446,59 +1383,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
               ) : (
                 /* Modo Lista Contínua */
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {filteredDisciples.map((disciple) => {
-                    const isGroupLeader = leaderIds.has(disciple.id)
-                    const registeredDiscipler = disciple.discipler_id
-                      ? profileMap.get(disciple.discipler_id)?.full_name
-                      : null
-                    const customDiscipler = disciple.custom_discipler_name || null
-                    const discipler = registeredDiscipler || customDiscipler
-                    const isCustomDiscipler = !registeredDiscipler && Boolean(customDiscipler)
-                    const spouse = disciple.spouse_id
-                      ? profileMap.get(disciple.spouse_id)?.full_name
-                      : null
-                    const father = disciple.father_id
-                      ? profileMap.get(disciple.father_id)?.full_name
-                      : null
-                    const mother = disciple.mother_id
-                      ? profileMap.get(disciple.mother_id)?.full_name
-                      : null
-                    const companions = fellowshipsByProfile.get(disciple.id) || []
-                    const discipleGroup = disciple.home_group_id
-                      ? homeGroups.find((g) => g.id === disciple.home_group_id)
-                      : null
-                    const groupName =
-                      selectedGroupFilter === "all" && discipleGroup
-                        ? getHomeGroupDisplayName(discipleGroup, profileMap)
-                        : null
-
-                    const isCoveredRoot =
-                      !!disciple.is_presbyter || !!(disciple.spouse_id && presbyterIds.has(disciple.spouse_id))
-
-                    const famInfo = familyByProfileId.get(disciple.id)
-
-                    return (
-                      <DiscipleCard
-                        key={disciple.id}
-                        disciple={disciple}
-                        isLeader={isGroupLeader}
-                        disciplerName={discipler}
-                        spouseName={spouse}
-                        fatherName={father}
-                        motherName={mother}
-                        fellowshipNames={companions}
-                        groupName={groupName}
-                        isCoveredRoot={isCoveredRoot}
-                        isCustomDiscipler={isCustomDiscipler}
-                        isFamilyHead={famInfo?.isHead}
-                        familyRoleLabel={famInfo?.roleLabel}
-                        familyName={famInfo?.family.isIndividual ? null : famInfo?.family.name}
-                        onEdit={handleOpenEditDisciple}
-                        onTransformChild={handleOpenTransformBaptism}
-                        onTransformToLinked={handleOpenTransformToLinked}
-                      />
-                    )
-                  })}
+                  {filteredDisciples.map((disciple) => renderDiscipleCard(disciple))}
                 </div>
               )}
             </div>
@@ -1555,13 +1440,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
       {/* ========================================================= */}
       <DiscipleEditorDialog
         open={isDiscipleDialogOpen}
-        onOpenChange={(open) => {
-          setIsDiscipleDialogOpen(open)
-          if (!open) {
-            setTransformToBaptizedOnOpen(false)
-            setTransformToLinkedOnOpen(false)
-          }
-        }}
+        onOpenChange={setIsDiscipleDialogOpen}
         disciple={editingDisciple}
         homeGroups={homeGroups}
         allProfiles={profiles}
@@ -1575,8 +1454,6 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         }
         isTier3={!singleGroupMode && isTier3}
         lockGroupSelectionOnCreate={singleGroupMode}
-        initialTransformToBaptized={transformToBaptizedOnOpen}
-        initialTransformToLinked={transformToLinkedOnOpen}
         onSuccess={() => loadData(false)}
       />
 

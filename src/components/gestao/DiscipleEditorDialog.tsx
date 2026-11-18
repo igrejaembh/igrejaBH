@@ -153,6 +153,7 @@ export function DiscipleEditorDialog({
   const [birthDate, setBirthDate] = useState<string>("")
   const [baptismDate, setBaptismDate] = useState<string>("")
   const [isChurchLinked, setIsChurchLinked] = useState<boolean>(true)
+  const [isGroupNucleus, setIsGroupNucleus] = useState<boolean>(false)
 
   // Loading & Deletion
   const [saving, setSaving] = useState<boolean>(false)
@@ -188,6 +189,7 @@ export function DiscipleEditorDialog({
             : (disciple.baptism_date || "")
         )
         setIsChurchLinked(shouldTransformLinked ? true : (disciple.is_church_linked !== false))
+        setIsGroupNucleus(Boolean(disciple.is_group_nucleus))
 
         if (shouldTransform) {
           toast.info("Defina a data do batismo do irmão.")
@@ -222,6 +224,7 @@ export function DiscipleEditorDialog({
         setBirthDate("")
         setBaptismDate("")
         setIsChurchLinked(true)
+        setIsGroupNucleus(false)
       }
       setCompanionToAdd("none")
       setConfirmDelete(false)
@@ -554,6 +557,7 @@ export function DiscipleEditorDialog({
         is_baptized: !isChild && isBaptized,
         baptism_date: !isChild && isBaptized ? finalBaptism : null,
         is_church_linked: isChurchLinked,
+        is_group_nucleus: !isChild && isGroupNucleus,
       }
 
       let savedProfileId = disciple?.id
@@ -958,6 +962,23 @@ export function DiscipleEditorDialog({
                   clearable={false}
                 />
               </div>
+
+              {/* Núcleo de Grupo Caseiro */}
+              {!isChild && (
+                <div className="sm:col-span-2">
+                  <Label
+                    htmlFor="isGroupNucleus"
+                    className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl border border-border/70 bg-muted/25 px-3.5 py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/40"
+                  >
+                    <Checkbox
+                      id="isGroupNucleus"
+                      checked={isGroupNucleus}
+                      onCheckedChange={(checked) => setIsGroupNucleus(!!checked)}
+                    />
+                    <span className="leading-snug">Núcleo de Grupo Caseiro</span>
+                  </Label>
+                </div>
+              )}
             </div>
           </div>
 

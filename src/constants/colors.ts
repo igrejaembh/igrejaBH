@@ -389,6 +389,10 @@ export const THEME_CLASSES = {
     "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide bg-red-500/15 text-red-700 border border-red-500/30 dark:text-red-400",
   badgeInfo:
     "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 border border-blue-500/20 dark:text-blue-400",
+  badgeGroupLeader:
+    "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-500/10 text-green-800 border border-green-600/25 dark:bg-green-500/15 dark:text-green-300 dark:border-green-400/30",
+  badgeGroupNucleus:
+    "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-500/10 text-sky-800 border border-sky-600/25 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-400/30",
   badgePriority:
     "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-700 border border-purple-500/25 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-500/30",
 } as const;
