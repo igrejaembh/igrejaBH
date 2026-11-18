@@ -24,6 +24,7 @@ import {
 import { EyeIcon, EyeOffIcon, LockIcon, MailIcon, Loader2, ArrowLeft } from "lucide-react"
 import { useState } from "react"
 import supabase from "@/lib/supabase"
+import { fetchUserProfile } from "@/hooks/useCurrentUserProfile"
 import { isRestrictedGroupMode } from "@/lib/restrictedMode"
 import {
   claimParticipantRegistrationsSafe,
@@ -60,18 +61,25 @@ export default function SignIn() {
         password: data.password,
       })
       if (error) throw error
-      const claimedCount = await claimParticipantRegistrationsSafe()
+      const [claimedCount] = await Promise.all([
+        claimParticipantRegistrationsSafe(),
+        fetchUserProfile(true),
+      ])
       return { authData, claimedCount }
     }
 
     toast.promise(signInOperation(), {
       loading: "Realizando login...",
       success: ({ claimedCount }) => {
-        const target = isRestricted
-          ? `${fromLocation?.pathname || "/meu-grupo"}${fromLocation?.search || ""}`
-          : fromLocation?.pathname
+        const fromPath =
+          fromLocation?.pathname &&
+          fromLocation.pathname !== "/entrar" &&
+          fromLocation.pathname !== "/login"
             ? `${fromLocation.pathname}${fromLocation.search || ""}`
-            : redirectParam || "/dashboard"
+            : null
+        const target = isRestricted
+          ? fromPath || "/meu-grupo"
+          : fromPath || redirectParam || "/dashboard"
         navigate(target, { replace: true })
         return claimedCount > 0
           ? `Login realizado! ${claimedCount} inscrição(ões) anteriores vinculada(s) à sua conta.`
