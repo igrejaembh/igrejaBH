@@ -21,11 +21,18 @@ import {
   HeartHandshake,
   Printer,
   Bell,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
 import { calculateTotalPrice, type FormField } from "@/lib/forms";
 import { formatDateBR } from "@/lib/utils";
+import {
+  getEffectiveRetreatStatus,
+  isRetreatAutoClosed,
+  isRetreatExpiredByDate,
+  syncExpiredRetreats,
+} from "@/lib/retreatStatus";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -243,6 +250,8 @@ export default function ManageEventDetail() {
   const fetchRetreatDetails = useCallback(async (id: string) => {
     setLoadingRetreat(true);
     try {
+      const syncResult = await syncExpiredRetreats();
+
       const { data, error } = await supabase
         .from("retreats")
         .select(`
@@ -255,10 +264,17 @@ export default function ManageEventDetail() {
         .single();
 
       if (error) throw error;
-      setRetreat(data);
+      const normalizedData =
+        data && syncResult.usedFallback
+          ? {
+              ...data,
+              status: getEffectiveRetreatStatus(data.status, data.end_date),
+            }
+          : data;
+      setRetreat(normalizedData);
 
-      if (data?.form_id) {
-        fetchFormTemplate(data.form_id);
+      if (normalizedData?.form_id) {
+        fetchFormTemplate(normalizedData.form_id);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erro ao carregar evento";
@@ -748,6 +764,13 @@ export default function ManageEventDetail() {
   // Activate Draft Event
   const handleActivateEvent = async () => {
     if (!retreat) return;
+    if (isRetreatExpiredByDate(retreat.end_date)) {
+      toast.warning(
+        "Este retiro possui data de término no passado e encerra automaticamente. Atualize a data de término antes de publicar."
+      );
+      setIsEditEventOpen(true);
+      return;
+    }
     try {
       const { error } = await supabase
         .from("retreats")
@@ -1253,6 +1276,13 @@ export default function ManageEventDetail() {
               </div>
             )}
           </div>
+
+          {isRetreatAutoClosed(retreat.status, retreat.end_date) && (
+            <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 pt-0.5">
+              <Info className="w-3.5 h-3.5 shrink-0" />
+              <span>Encerrado automaticamente após a data de término do evento.</span>
+            </div>
+          )}
         </div>
 
         {/* Header Action Buttons */}

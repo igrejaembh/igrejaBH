@@ -35,6 +35,11 @@ import { EventWaitlistForm } from "@/components/events/EventWaitlistForm"
 import { Layout } from "@/components/layout/Layout"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { parseEndOfDay } from "@/lib/utils"
+import {
+  getEffectiveRetreatStatus,
+  isRetreatExpiredByDate,
+  syncExpiredRetreats,
+} from "@/lib/retreatStatus"
 import type { User } from "@supabase/supabase-js"
 
 export default function FormResponder() {
@@ -225,6 +230,9 @@ export default function FormResponder() {
             setShowPresentation(true)
           }
 
+          // Sync expired retreats in DB before checking retreat status
+          await syncExpiredRetreats()
+
           // Check associated retreat for status, capacity and expiration date
           const { data: associatedRetreats, error: retreatError } = await supabase
             .from("retreats")
@@ -244,17 +252,21 @@ export default function FormResponder() {
 
             if (!retreat) {
               // Prioritize active retreats so a conflict doesn't lock out an active event
-              retreat = associatedRetreats.find((r) => r.status === "ativo") ||
+              retreat = associatedRetreats.find(
+                          (r) => getEffectiveRetreatStatus(r.status, r.end_date) === "ativo"
+                        ) ||
                         associatedRetreats.find((r) => r.status === "rascunho") ||
                         associatedRetreats[0]
             }
 
-            setAssociatedRetreat(retreat)
-            setAssociatedEventTitle(retreat.title)
+            const effectiveStatus = getEffectiveRetreatStatus(retreat.status, retreat.end_date)
+            const normalizedRetreat = { ...retreat, status: effectiveStatus }
+            setAssociatedRetreat(normalizedRetreat)
+            setAssociatedEventTitle(normalizedRetreat.title)
 
-            if (retreat.status === "rascunho") {
+            if (effectiveStatus === "rascunho") {
               setClosedReason("draft")
-            } else if (retreat.status === "encerrado") {
+            } else if (effectiveStatus === "encerrado") {
               setClosedReason("ended")
             } else {
               // Check date expiration
@@ -311,8 +323,21 @@ export default function FormResponder() {
                 .eq("id", directRetreatId)
                 .maybeSingle()
               if (directRetreat) {
-                setAssociatedRetreat(directRetreat)
-                setAssociatedEventTitle(directRetreat.title)
+                const effectiveStatus = getEffectiveRetreatStatus(
+                  directRetreat.status,
+                  directRetreat.end_date
+                )
+                const normalizedDirectRetreat = { ...directRetreat, status: effectiveStatus }
+                setAssociatedRetreat(normalizedDirectRetreat)
+                setAssociatedEventTitle(normalizedDirectRetreat.title)
+                if (effectiveStatus === "rascunho") {
+                  setClosedReason("draft")
+                  return
+                }
+                if (effectiveStatus === "encerrado") {
+                  setClosedReason("ended")
+                  return
+                }
               } else {
                 setAssociatedRetreat(null)
                 setAssociatedEventTitle(null)
@@ -1142,8 +1167,11 @@ export default function FormResponder() {
       title = "Formulário em Rascunho"
       description = `Este formulário está vinculado ao evento "${associatedEventTitle}", que atualmente está em modo de rascunho (não publicado). O acesso será liberado assim que o evento for publicado.`
     } else if (closedReason === "ended") {
-      title = "Inscrições Encerradas"
-      description = `As inscrições para o evento "${associatedEventTitle}" foram encerradas pela administração.`
+      const expiredByDate = isRetreatExpiredByDate(associatedRetreat?.end_date)
+      title = expiredByDate ? "Evento Encerrado" : "Inscrições Encerradas"
+      description = expiredByDate
+        ? `O período do evento "${associatedEventTitle}" já foi encerrado e as inscrições não estão mais abertas.`
+        : `As inscrições para o evento "${associatedEventTitle}" foram encerradas pela administração.`
       iconColor = "text-red-500"
       iconBg = "bg-red-500/10"
     } else if (closedReason === "expired") {

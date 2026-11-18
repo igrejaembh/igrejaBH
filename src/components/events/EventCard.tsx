@@ -10,6 +10,7 @@ import {
   CheckCircle2, 
   FileText,
   Clock,
+  Info,
 } from "lucide-react";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Database } from "@/lib/database.types";
 import { parseLocalDate, formatDateBR } from "@/lib/utils";
+import { isRetreatAutoClosed } from "@/lib/retreatStatus";
 
 export type RetreatWithForm = Database["public"]["Tables"]["retreats"]["Row"] & {
   forms?: {
@@ -109,6 +111,7 @@ export function EventCard({
   };
 
   const isFree = retreat.has_payment === false || !retreat.price || retreat.price === 0;
+  const autoClosed = isRetreatAutoClosed(retreat.status, retreat.end_date);
 
   const formattedPrice = !isFree && retreat.price
     ? new Intl.NumberFormat("pt-BR", {
@@ -214,6 +217,15 @@ export function EventCard({
             <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-medium">
               <Clock className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">Inscrições até: {formatDateBR(retreat.registration_deadline)}</span>
+            </div>
+          )}
+
+          {autoClosed && (
+            <div className="flex items-start gap-2 text-zinc-600 dark:text-zinc-400 pt-0.5">
+              <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span className="leading-snug">
+                Encerrado automaticamente após a data de término
+              </span>
             </div>
           )}
         </div>
