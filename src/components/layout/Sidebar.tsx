@@ -18,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { navItems } from "./NavItems"
+import { navItems, isNavItemVisible } from "./NavItems"
 import { useTheme } from "@/components/theme-provider"
 import { ThemeSwitch } from "@/components/ThemeSwitch"
 import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile"
@@ -26,7 +26,8 @@ import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile"
 export function Sidebar() {
   const location = useLocation()
   const { resolvedTheme, setTheme } = useTheme()
-  const { profile, isAdmin, isManagement, canPost, loading } = useCurrentUserProfile()
+  const userState = useCurrentUserProfile()
+  const { profile, loading } = userState
 
   const isDark = resolvedTheme === "dark"
 
@@ -43,12 +44,9 @@ export function Sidebar() {
     localStorage.setItem("sidebar-collapsed", JSON.stringify(isCollapsed))
   }, [isCollapsed])
 
-  const filteredNavItems = navItems.filter((item) => {
-    if (item.requireAdmin && !isAdmin) return false
-    if (item.requireManagement && !isManagement) return false
-    if (item.requireCanPost && !canPost) return false
-    return true
-  })
+  const filteredNavItems = navItems.filter((item) =>
+    isNavItemVisible(item, userState)
+  )
 
   const handleLogout = async () => {
     await supabase.auth.signOut()

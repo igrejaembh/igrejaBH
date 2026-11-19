@@ -44,7 +44,6 @@ export function useNewsFeed(options: UseNewsFeedOptions = {}) {
         .from("posts")
         .select(`
           *,
-          author:profiles!posts_author_id_fkey(id, full_name, avatar_url),
           media_resources(*),
           forms(id, name, description, is_public),
           retreats(id, title, start_date, end_date, location_text, status, price)
@@ -69,7 +68,43 @@ export function useNewsFeed(options: UseNewsFeedOptions = {}) {
 
       if (queryError) throw queryError
 
-      setPosts((data as unknown as PostWithRelations[]) || [])
+      const rawPosts = (data as unknown as PostWithRelations[]) || []
+      const authorIds = Array.from(
+        new Set(
+          rawPosts
+            .map((p) => p.author_id)
+            .filter((id): id is string => Boolean(id))
+        )
+      )
+
+      const authorMap = new Map<
+        string,
+        { id: string; full_name: string; avatar_url: string | null }
+      >()
+
+      if (authorIds.length > 0) {
+        const { data: dirRows } = await supabase
+          .from("profile_directory")
+          .select("id, full_name, avatar_url")
+          .in("id", authorIds)
+
+        if (dirRows) {
+          for (const row of dirRows) {
+            authorMap.set(row.id, {
+              id: row.id,
+              full_name: row.full_name,
+              avatar_url: row.avatar_url,
+            })
+          }
+        }
+      }
+
+      const enriched = rawPosts.map((p) => ({
+        ...p,
+        author: p.author_id ? authorMap.get(p.author_id) ?? null : null,
+      }))
+
+      setPosts(enriched)
     } catch (err) {
       console.error("Erro ao buscar feed de notícias:", err)
       setError(err as Error)

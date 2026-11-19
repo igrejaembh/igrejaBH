@@ -4,11 +4,17 @@ import { Loader2 } from "lucide-react"
 import { Navigate, Outlet, useLocation } from "react-router-dom"
 import type { ReactNode } from "react"
 
-interface ProtectedRouteProps {
-  children?: ReactNode
+export interface RoutePermissionProps {
   requireAdmin?: boolean
   requireManagement?: boolean
   requireCanPost?: boolean
+  requireManageEvents?: boolean
+  requireManageForms?: boolean
+  requireEventsAccess?: boolean
+}
+
+interface ProtectedRouteProps extends RoutePermissionProps {
+  children?: ReactNode
 }
 
 export function ProtectedRoute({
@@ -16,8 +22,21 @@ export function ProtectedRoute({
   requireAdmin,
   requireManagement,
   requireCanPost,
+  requireManageEvents,
+  requireManageForms,
+  requireEventsAccess,
 }: ProtectedRouteProps) {
-  const { user, profile, isAdmin, isManagement, canPost, loading } = useCurrentUserProfile()
+  const {
+    user,
+    profile,
+    isAdmin,
+    isManagement,
+    canPost,
+    canManageEvents,
+    canManageForms,
+    canViewEventsNav,
+    loading,
+  } = useCurrentUserProfile()
   const location = useLocation()
 
   if (loading) {
@@ -43,6 +62,18 @@ export function ProtectedRoute({
   }
 
   if (requireCanPost && !canPost) {
+    return <Navigate to={fallbackPath} replace />
+  }
+
+  if (requireManageEvents && !canManageEvents) {
+    return <Navigate to={fallbackPath} replace />
+  }
+
+  if (requireManageForms && !canManageForms) {
+    return <Navigate to={fallbackPath} replace />
+  }
+
+  if (requireEventsAccess && !canViewEventsNav) {
     return <Navigate to={fallbackPath} replace />
   }
 

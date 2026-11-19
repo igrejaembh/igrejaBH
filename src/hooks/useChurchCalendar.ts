@@ -13,6 +13,8 @@ export interface CalendarEventItem {
   dayEnd?: number
   month: number // 1-12
   year: number
+  endMonth?: number // 1-12
+  endYear?: number
   title: string
   description?: string | null
   type: "retiro" | "encontro" | "geral"
@@ -117,7 +119,12 @@ export function formatEventSchedule(startDateStr: string, endDateStr?: string | 
 }
 
 export function useChurchCalendar(options: UseChurchCalendarOptions = {}) {
-  const { publicOnly = false, initialMonth = 10, initialYear = 2026 } = options
+  const now = new Date()
+  const {
+    publicOnly = false,
+    initialMonth = now.getMonth() + 1,
+    initialYear = now.getFullYear(),
+  } = options
 
   const [currentDate, setCurrentDate] = useState(() => new Date(initialYear, initialMonth - 1, 1))
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
@@ -175,6 +182,8 @@ export function useChurchCalendar(options: UseChurchCalendarOptions = {}) {
             dayEnd: parsedEnd ? parsedEnd.day : undefined,
             month: parsedStart.month,
             year: parsedStart.year,
+            endMonth: parsedEnd ? parsedEnd.month : undefined,
+            endYear: parsedEnd ? parsedEnd.year : undefined,
             type: "retiro",
             typeLabel: "Retiro Comunitário",
             location: r.location_text,
@@ -204,6 +213,8 @@ export function useChurchCalendar(options: UseChurchCalendarOptions = {}) {
             dayEnd: parsedEnd ? parsedEnd.day : undefined,
             month: parsedStart.month,
             year: parsedStart.year,
+            endMonth: parsedEnd ? parsedEnd.month : undefined,
+            endYear: parsedEnd ? parsedEnd.year : undefined,
             type: "encontro",
             typeLabel: "Encontro na Cidade",
             location: p.event_location,
@@ -250,44 +261,72 @@ export function useChurchCalendar(options: UseChurchCalendarOptions = {}) {
   const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
   const firstDayOfWeek = new Date(currentYear, currentMonth - 1, 1).getDay()
 
-  // Eventos do mês atual
+  // Calcula o intervalo visível de dias de um evento dentro do mês/ano atual
+  const getVisibleDayRangeInMonth = useCallback(
+    (e: CalendarEventItem): { startDay: number; endDay: number } | null => {
+      const monthStart = new Date(currentYear, currentMonth - 1, 1)
+      const monthEnd = new Date(currentYear, currentMonth, 0)
+      const eventStart = new Date(e.year, e.month - 1, e.day)
+      const eventEnd =
+        e.dayEnd && e.endMonth && e.endYear
+          ? new Date(e.endYear, e.endMonth - 1, e.dayEnd)
+          : eventStart
+
+      const effectiveEnd = eventEnd < eventStart ? eventStart : eventEnd
+
+      if (eventStart > monthEnd || effectiveEnd < monthStart) {
+        return null
+      }
+
+      const startDay = eventStart < monthStart ? 1 : e.day
+      const endDay = effectiveEnd > monthEnd ? daysInMonth : (e.dayEnd ?? e.day)
+
+      return { startDay, endDay }
+    },
+    [currentYear, currentMonth, daysInMonth]
+  )
+
+  // Eventos do mês atual (inclui eventos que cruzam a virada do mês)
   const monthEvents = useMemo(() => {
-    return events.filter((e) => e.month === currentMonth && e.year === currentYear)
-  }, [events, currentMonth, currentYear])
+    return events.filter((e) => getVisibleDayRangeInMonth(e) !== null)
+  }, [events, getVisibleDayRangeInMonth])
 
   // Mapeamento de dias que possuem eventos
   const eventDaysMap = useMemo(() => {
     const map = new Map<number, CalendarEventItem[]>()
     monthEvents.forEach((e) => {
-      const start = e.day
-      const end = e.dayEnd || e.day
-      for (let d = start; d <= end; d++) {
+      const range = getVisibleDayRangeInMonth(e)
+      if (!range) return
+      for (let d = range.startDay; d <= range.endDay; d++) {
         const list = map.get(d) || []
         list.push(e)
         map.set(d, list)
       }
     })
     return map
-  }, [monthEvents])
+  }, [monthEvents, getVisibleDayRangeInMonth])
 
   // Eventos filtrados pelo dia selecionado (ou todos do mês)
   const filteredEvents = useMemo(() => {
     if (!selectedDay) return monthEvents
     return monthEvents.filter((e) => {
-      const end = e.dayEnd || e.day
-      return e.day <= selectedDay && end >= selectedDay
+      const range = getVisibleDayRangeInMonth(e)
+      if (!range) return false
+      return range.startDay <= selectedDay && range.endDay >= selectedDay
     })
-  }, [monthEvents, selectedDay])
+  }, [monthEvents, selectedDay, getVisibleDayRangeInMonth])
 
-  // Próximos eventos a partir de hoje
+  // Próximos eventos ou em andamento a partir de hoje
   const upcomingEvents = useMemo(() => {
     const today = startOfDay(new Date())
     return events.filter((e) => {
       try {
-        const parsed = parseDateSafe(e.startDateStr)
-        if (!parsed) return false
-        const eventDate = new Date(parsed.year, parsed.month - 1, parsed.day)
-        return isAfter(eventDate, today) || isSameDay(eventDate, today)
+        const parsedStart = parseDateSafe(e.startDateStr)
+        if (!parsedStart) return false
+        const parsedEnd = parseDateSafe(e.endDateStr)
+        const target = parsedEnd || parsedStart
+        const eventEndDate = new Date(target.year, target.month - 1, target.day)
+        return isAfter(eventEndDate, today) || isSameDay(eventEndDate, today)
       } catch {
         return false
       }

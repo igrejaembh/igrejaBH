@@ -28,10 +28,28 @@ import {
   Loader2,
   Check,
   RotateCcw,
+  Eye,
+  Shield,
+  UserMinus,
 } from "lucide-react"
 import { toast } from "sonner"
 import supabase from "@/lib/supabase"
 import type { Database } from "@/lib/database.types"
+import { Badge } from "@/components/ui/badge"
+import {
+  invalidateCurrentUserProfileCache,
+  useCurrentUserProfile,
+} from "@/hooks/useCurrentUserProfile"
+import {
+  ACCOUNT_TYPE_LABELS,
+  ROLE_LABELS,
+  canAssignProfileRole,
+  isProfileRole,
+  normalizeAccountType,
+  type AccountType,
+  type ProfileRole,
+} from "@/lib/permissions"
+import { ACCOUNT_TYPE_BADGE_CONFIG, ROLE_BADGE_CONFIG } from "@/constants/colors"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"]
@@ -45,7 +63,8 @@ export interface DiscipleEditorDialogProps {
   allProfiles: Profile[]
   fellowships: Fellowship[]
   defaultHomeGroupId?: string | null
-  isTier3: boolean
+  isTier3?: boolean
+  readOnly?: boolean
   initialTransformToBaptized?: boolean
   initialTransformToLinked?: boolean
   lockGroupSelectionOnCreate?: boolean
@@ -66,6 +85,9 @@ const normalizeGender = (val?: string | null): "M" | "F" | "" => {
   if (upper === "M" || upper === "MASCULINO" || upper === "HOMEM") return "M"
   return ""
 }
+
+const isMarriedMaritalStatus = (val?: string | null): boolean =>
+  Boolean(val?.toLowerCase().includes("casad"))
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -129,17 +151,19 @@ export function DiscipleEditorDialog({
   allProfiles,
   fellowships,
   defaultHomeGroupId,
+  readOnly = false,
   initialTransformToBaptized = false,
   initialTransformToLinked = false,
   lockGroupSelectionOnCreate = false,
   hideOptionalFieldsOnEdit = false,
   onSuccess,
 }: DiscipleEditorDialogProps) {
+  const { profile: currentUserProfile, roles: callerRoles } = useCurrentUserProfile()
   const isEditing = !!disciple
   const hideOptionalFields = isEditing && hideOptionalFieldsOnEdit
-  const isTransformingLinked = Boolean(
-    initialTransformToLinked || (disciple && disciple.is_church_linked === false)
-  )
+  const originalAccountType = disciple
+    ? normalizeAccountType(disciple.account_type, disciple.is_church_linked)
+    : "disciple"
 
   const [isChild, setIsChild] = useState<boolean>(false)
 
@@ -164,13 +188,30 @@ export function DiscipleEditorDialog({
   const [baptismDate, setBaptismDate] = useState<string>("")
   const [cpf, setCpf] = useState<string>("")
 
+  // Tipo de conta / Desvinculação / Papéis N:N
+  const [accountType, setAccountType] = useState<AccountType>("disciple")
+  const [unlinkedReason, setUnlinkedReason] = useState<string>("")
+  const [targetRoles, setTargetRoles] = useState<ProfileRole[]>([])
+  const [initialTargetRoles, setInitialTargetRoles] = useState<ProfileRole[]>([])
+  const [loadingRoles, setLoadingRoles] = useState<boolean>(false)
+
   // Controle de salvamento/exclusão
   const [saving, setSaving] = useState<boolean>(false)
   const [deleting, setDeleting] = useState<boolean>(false)
   const [confirmDelete, setConfirmDelete] = useState<boolean>(false)
 
+  const manageableRoles = useMemo(
+    () =>
+      (["dev", "presbyter", "deacon", "publisher"] as ProfileRole[]).filter((role) =>
+        canAssignProfileRole(callerRoles, role)
+      ),
+    [callerRoles]
+  )
+
   useEffect(() => {
     if (!open) return
+
+    let active = true
 
     if (disciple) {
       const childProfile = checkIsChild(disciple)
@@ -178,8 +219,12 @@ export function DiscipleEditorDialog({
       const nextIsChild = shouldTransform ? false : childProfile
       const married =
         Boolean(disciple.spouse_id) ||
-        Boolean(disciple.marital_status?.toLowerCase().includes("casad"))
+        isMarriedMaritalStatus(disciple.marital_status)
       const hasParents = Boolean(disciple.father_id || disciple.mother_id)
+      const baseAccountType = normalizeAccountType(
+        disciple.account_type,
+        disciple.is_church_linked
+      )
 
       setIsChild(nextIsChild)
       setFullName(disciple.full_name || "")
@@ -203,6 +248,32 @@ export function DiscipleEditorDialog({
           : disciple.baptism_date || ""
       )
       setCpf(disciple.cpf ? formatCPF(disciple.cpf) : "")
+      setAccountType(initialTransformToLinked ? "disciple" : baseAccountType)
+      setUnlinkedReason(disciple.unlinked_reason || "")
+
+      const fallbackRoles: ProfileRole[] = []
+      if (disciple.is_dev) fallbackRoles.push("dev")
+      if (disciple.is_presbyter) fallbackRoles.push("presbyter")
+      if (disciple.is_deacon) fallbackRoles.push("deacon")
+      if (disciple.can_post) fallbackRoles.push("publisher")
+      setTargetRoles(fallbackRoles)
+      setInitialTargetRoles(fallbackRoles)
+
+      setLoadingRoles(true)
+      supabase
+        .from("profile_roles")
+        .select("role")
+        .eq("profile_id", disciple.id)
+        .then(({ data, error }) => {
+          if (!active) return
+          setLoadingRoles(false)
+          if (error || !data) return
+          const loaded = data
+            .map((r) => r.role)
+            .filter((r): r is ProfileRole => isProfileRole(r))
+          setTargetRoles(loaded)
+          setInitialTargetRoles(loaded)
+        })
 
       const currentCompanions = fellowships
         .filter((f) => f.member_a_id === disciple.id || f.member_b_id === disciple.id)
@@ -228,9 +299,18 @@ export function DiscipleEditorDialog({
       setBirthDate("")
       setBaptismDate("")
       setCpf("")
+      setAccountType("disciple")
+      setUnlinkedReason("")
+      setTargetRoles([])
+      setInitialTargetRoles([])
+      setLoadingRoles(false)
     }
 
     setConfirmDelete(false)
+
+    return () => {
+      active = false
+    }
   }, [
     open,
     disciple,
@@ -238,6 +318,7 @@ export function DiscipleEditorDialog({
     homeGroups,
     fellowships,
     initialTransformToBaptized,
+    initialTransformToLinked,
   ])
 
   const profileMap = useMemo(() => {
@@ -369,17 +450,51 @@ export function DiscipleEditorDialog({
       .sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR"))
   }, [allProfiles, disciple?.id, disciplerId, gender])
 
+  const linkedSpouseMap = useMemo(() => {
+    const map = new Map<string, Set<string>>()
+    const addLink = (a: string, b: string) => {
+      if (!map.has(a)) map.set(a, new Set())
+      map.get(a)!.add(b)
+    }
+    allProfiles.forEach((p) => {
+      if (p.spouse_id) {
+        addLink(p.id, p.spouse_id)
+        addLink(p.spouse_id, p.id)
+      }
+    })
+    return map
+  }, [allProfiles])
+
   const availableSpouses = useMemo(() => {
+    const currentId = disciple?.id
     const oppositeGender = gender === "M" ? "F" : gender === "F" ? "M" : ""
+
+    const getPriority = (p: Profile) => {
+      if (currentId && linkedSpouseMap.get(p.id)?.has(currentId)) return 0
+      if (!isMarriedMaritalStatus(p.marital_status)) return 1
+      return 2
+    }
+
     return allProfiles
       .filter((p) => {
-        if (p.id === disciple?.id) return false
+        if (p.id === currentId) return false
+        if (oppositeGender && normalizeGender(p.gender) !== oppositeGender) return false
         if (p.id === spouseId) return true
         if (checkIsChild(p)) return false
-        return oppositeGender ? normalizeGender(p.gender) === oppositeGender : true
+
+        const partners = linkedSpouseMap.get(p.id)
+        if (partners && Array.from(partners).some((partnerId) => partnerId !== currentId)) {
+          return false
+        }
+
+        return true
       })
-      .sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR"))
-  }, [allProfiles, disciple?.id, spouseId, gender])
+      .sort(
+        (a, b) =>
+          getPriority(a) - getPriority(b) ||
+          a.full_name.localeCompare(b.full_name, "pt-BR")
+      )
+  }, [allProfiles, disciple?.id, spouseId, gender, linkedSpouseMap])
 
   const availableCompanions = useMemo(() => {
     return allProfiles
@@ -451,16 +566,31 @@ export function DiscipleEditorDialog({
   }
 
   const spouseOptions = useMemo<SearchableSelectOption[]>(() => {
+    const currentId = disciple?.id
     return [
       { value: "none", label: "Não cadastrado" },
-      ...availableSpouses.map((p) => ({
-        value: p.id,
-        label: p.full_name,
-        description: p.phone ? formatPhone(p.phone) : undefined,
-        keywords: p.phone || "",
-      })),
+      ...availableSpouses.map((p) => {
+        const isLinkedToCurrent = Boolean(currentId && linkedSpouseMap.get(p.id)?.has(currentId))
+        const isCurrentSpouse = Boolean(disciple?.spouse_id && disciple.spouse_id === p.id)
+        const isUnlinkedMarried = !isLinkedToCurrent && isMarriedMaritalStatus(p.marital_status)
+
+        return {
+          value: p.id,
+          label: p.full_name,
+          description: p.phone ? formatPhone(p.phone) : undefined,
+          badge: isLinkedToCurrent
+            ? isCurrentSpouse
+              ? "Cônjuge atual"
+              : "Vinculado(a) a você"
+            : isUnlinkedMarried
+            ? "Casado(a)"
+            : undefined,
+          featured: isLinkedToCurrent,
+          keywords: p.phone || "",
+        }
+      }),
     ]
-  }, [availableSpouses])
+  }, [availableSpouses, disciple?.id, disciple?.spouse_id, linkedSpouseMap])
 
   const companionOptions = useMemo<SearchableSelectOption[]>(() => {
     return availableCompanions.map((p) => ({
@@ -507,7 +637,16 @@ export function DiscipleEditorDialog({
     setSelectedFellowships((prev) => prev.filter((id) => id !== idToRemove))
   }
 
+  const handleToggleRole = (role: ProfileRole) => {
+    if (readOnly || !canAssignProfileRole(callerRoles, role)) return
+    setTargetRoles((prev) =>
+      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
+    )
+  }
+
   const handleSave = async () => {
+    if (readOnly) return
+
     if (!fullName.trim()) {
       toast.error("Informe o nome.")
       return
@@ -517,6 +656,25 @@ export function DiscipleEditorDialog({
       toast.error("Selecione o sexo.")
       return
     }
+
+    const nextAccountType: AccountType = isEditing ? accountType : "disciple"
+    const nextIsChurchLinked = nextAccountType === "disciple"
+    const isTransitioningToUnlinked =
+      nextAccountType === "unlinked" && originalAccountType !== "unlinked"
+    const nextUnlinkedAt =
+      nextAccountType === "unlinked"
+        ? isTransitioningToUnlinked
+          ? new Date().toISOString()
+          : disciple?.unlinked_at || new Date().toISOString()
+        : null
+    const nextUnlinkedBy =
+      nextAccountType === "unlinked"
+        ? isTransitioningToUnlinked
+          ? currentUserProfile?.id || null
+          : disciple?.unlinked_by || currentUserProfile?.id || null
+        : null
+    const nextUnlinkedReason =
+      nextAccountType === "unlinked" ? unlinkedReason.trim() || null : null
 
     if (isChild) {
       if (fatherId === "none" && motherId === "none") {
@@ -550,7 +708,11 @@ export function DiscipleEditorDialog({
           is_baptized: false,
           baptism_date: null,
           is_group_nucleus: false,
-          is_church_linked: isTransformingLinked ? true : disciple ? disciple.is_church_linked : true,
+          account_type: nextAccountType,
+          is_church_linked: nextIsChurchLinked,
+          unlinked_at: nextUnlinkedAt,
+          unlinked_by: nextUnlinkedBy,
+          unlinked_reason: nextUnlinkedReason,
         }
 
         if (isEditing && disciple) {
@@ -695,7 +857,11 @@ export function DiscipleEditorDialog({
         is_baptized: true,
         baptism_date: cleanBaptism,
         cpf: cleanCPF,
-        is_church_linked: isTransformingLinked ? true : disciple ? disciple.is_church_linked : true,
+        account_type: nextAccountType,
+        is_church_linked: nextIsChurchLinked,
+        unlinked_at: nextUnlinkedAt,
+        unlinked_by: nextUnlinkedBy,
+        unlinked_reason: nextUnlinkedReason,
       }
 
       let savedProfileId = disciple?.id
@@ -709,11 +875,20 @@ export function DiscipleEditorDialog({
         if (updateError) throw updateError
         profileSaved = true
 
+        const staleSpouseIds = new Set<string>()
         if (disciple.spouse_id && disciple.spouse_id !== profilePayload.spouse_id) {
+          staleSpouseIds.add(disciple.spouse_id)
+        }
+        allProfiles.forEach((p) => {
+          if (p.spouse_id === disciple.id && p.id !== profilePayload.spouse_id) {
+            staleSpouseIds.add(p.id)
+          }
+        })
+        for (const oldSpouseId of staleSpouseIds) {
           await supabase
             .from("profiles")
             .update({ spouse_id: null })
-            .eq("id", disciple.spouse_id)
+            .eq("id", oldSpouseId)
         }
         if (profilePayload.spouse_id) {
           await supabase
@@ -777,6 +952,39 @@ export function DiscipleEditorDialog({
           const { error: fErr } = await supabase.from("fellowships").insert(insertRows)
           if (fErr) throw fErr
         }
+
+        if (isEditing && nextAccountType === "disciple" && manageableRoles.length > 0) {
+          const rolesToRemove = initialTargetRoles.filter(
+            (role) => canAssignProfileRole(callerRoles, role) && !targetRoles.includes(role)
+          )
+          const rolesToAdd = targetRoles.filter(
+            (role) => canAssignProfileRole(callerRoles, role) && !initialTargetRoles.includes(role)
+          )
+
+          if (rolesToRemove.length > 0) {
+            const { error: delRoleErr } = await supabase
+              .from("profile_roles")
+              .delete()
+              .eq("profile_id", savedProfileId)
+              .in("role", rolesToRemove)
+            if (delRoleErr) throw delRoleErr
+          }
+
+          if (rolesToAdd.length > 0) {
+            const { error: addRoleErr } = await supabase.from("profile_roles").insert(
+              rolesToAdd.map((role) => ({
+                profile_id: savedProfileId!,
+                role,
+                granted_by: currentUserProfile?.id ?? null,
+              }))
+            )
+            if (addRoleErr) throw addRoleErr
+          }
+        }
+      }
+
+      if (savedProfileId === currentUserProfile?.id) {
+        invalidateCurrentUserProfileCache()
       }
 
       toast.success(isEditing ? "Cadastro atualizado." : "Cadastro criado.")
@@ -799,7 +1007,7 @@ export function DiscipleEditorDialog({
   }
 
   const handleDelete = async () => {
-    if (!disciple) return
+    if (readOnly || !disciple) return
     setDeleting(true)
     try {
       const { error } = await supabase.from("profiles").delete().eq("id", disciple.id)
@@ -826,15 +1034,32 @@ export function DiscipleEditorDialog({
         className="max-h-[92dvh] sm:max-h-[88dvh] flex flex-col p-0 overflow-hidden gap-0"
       >
         <DialogHeader className="px-5 py-4 sm:px-6 border-b border-border/60 shrink-0">
-          <DialogTitle>
-            {isEditing ? "Editar Cadastro" : "Novo Cadastro"}
-          </DialogTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <DialogTitle>
+              {readOnly ? "Visualizar Cadastro" : isEditing ? "Editar Cadastro" : "Novo Cadastro"}
+            </DialogTitle>
+            {isEditing && accountType !== "disciple" && (
+              <Badge variant="outline" className={ACCOUNT_TYPE_BADGE_CONFIG[accountType].className}>
+                {ACCOUNT_TYPE_BADGE_CONFIG[accountType].label}
+              </Badge>
+            )}
+          </div>
           <DialogDescription className="sr-only">
-            Formulário de cadastro e edição de irmão.
+            Formulário de cadastro e edição de discípulo.
           </DialogDescription>
         </DialogHeader>
 
         <DialogBody className="flex-[0_1_auto] min-h-0 overflow-y-auto flex flex-col gap-5 px-5 py-4 sm:px-6">
+          {readOnly && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-border/80 bg-muted/40 p-3 text-xs text-muted-foreground">
+              <Eye className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                Modo visualização (Diácono). Alterações de pessoas, vínculos e juntas são realizadas por Presbíteros ou Líderes de GC.
+              </span>
+            </div>
+          )}
+
+          <fieldset disabled={readOnly} className="contents">
           {/* Tipo ao criar novo */}
           {!isEditing && (
             <div className="grid grid-cols-2 gap-2">
@@ -1279,7 +1504,144 @@ export function DiscipleEditorDialog({
             </>
           )}
 
-          {isEditing && disciple?.user_id === null && confirmDelete && (
+          {isEditing && !isChild && (!hideOptionalFields || accountType === "unlinked") && (
+            <>
+              <Separator />
+
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <UserMinus className="h-3.5 w-3.5" />
+                  <span>Vínculo com a Igreja</span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {(originalAccountType === "study" ||
+                    originalAccountType === "frequent_participant") && (
+                    <Button
+                      type="button"
+                      variant={accountType === originalAccountType ? "default" : "outline"}
+                      onClick={() => setAccountType(originalAccountType)}
+                      className="h-11 min-h-[44px] rounded-xl px-4 text-xs font-medium"
+                    >
+                      Manter {ACCOUNT_TYPE_LABELS[originalAccountType]}
+                    </Button>
+                  )}
+
+                  <Button
+                    type="button"
+                    variant={accountType === "disciple" ? "default" : "outline"}
+                    onClick={() => setAccountType("disciple")}
+                    className="h-11 min-h-[44px] rounded-xl px-4 text-xs font-medium"
+                  >
+                    {accountType === "disciple" && <Check data-icon="inline-start" />}
+                    <span>Discípulo vinculado</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant={accountType === "unlinked" ? "destructive" : "outline"}
+                    onClick={() => setAccountType("unlinked")}
+                    className="h-11 min-h-[44px] rounded-xl px-4 text-xs font-medium"
+                  >
+                    {accountType === "unlinked" && <Check data-icon="inline-start" />}
+                    <span>Desvinculado</span>
+                  </Button>
+                </div>
+
+                {accountType === "unlinked" && (
+                  <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                    {disciple?.unlinked_at && (
+                      <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                        Desvinculado em{" "}
+                        {new Date(disciple.unlinked_at).toLocaleDateString("pt-BR")}
+                      </p>
+                    )}
+                    <Field>
+                      <FieldLabel htmlFor="disciple-unlinked-reason">
+                        Motivo do desligamento (opcional)
+                      </FieldLabel>
+                      <Input
+                        id="disciple-unlinked-reason"
+                        value={unlinkedReason}
+                        onChange={(e) => setUnlinkedReason(e.target.value)}
+                        placeholder="Ex: Mudança de cidade, transição de igreja..."
+                        className="h-11 min-h-[44px] rounded-xl text-xs"
+                      />
+                    </Field>
+                    <p className="text-[11px] text-muted-foreground">
+                      Mantém acesso de participante de estudos/eventos e preserva o registro de saída, removendo permissões administrativas e liderança de GC.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {isEditing &&
+            !isChild &&
+            accountType === "disciple" &&
+            (manageableRoles.length > 0 || targetRoles.length > 0) && (
+              <>
+                <Separator />
+
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      <Shield className="h-3.5 w-3.5" />
+                      <span>Papéis Administrativos</span>
+                    </span>
+                    {loadingRoles && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                  </div>
+
+                  {manageableRoles.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {manageableRoles.map((role) => {
+                        const checked = targetRoles.includes(role)
+                        return (
+                          <Label
+                            key={role}
+                            htmlFor={`disciple-role-${role}`}
+                            className="flex min-h-[44px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-3.5 py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/40"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <Checkbox
+                                id={`disciple-role-${role}`}
+                                checked={checked}
+                                onCheckedChange={() => handleToggleRole(role)}
+                              />
+                              <span>{ROLE_LABELS[role]}</span>
+                            </div>
+                            <Badge variant="outline" className={ROLE_BADGE_CONFIG[role].className}>
+                              {ROLE_BADGE_CONFIG[role].label}
+                            </Badge>
+                          </Label>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+
+                  {targetRoles.some((r) => !manageableRoles.includes(r)) && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <span>Outros papéis:</span>
+                      {targetRoles
+                        .filter((r) => !manageableRoles.includes(r))
+                        .map((role) => (
+                          <Badge
+                            key={role}
+                            variant="outline"
+                            className={ROLE_BADGE_CONFIG[role].className}
+                          >
+                            {ROLE_BADGE_CONFIG[role].label}
+                          </Badge>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </fieldset>
+
+          {!readOnly && isEditing && disciple?.user_id === null && confirmDelete && (
             <div className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-xs font-medium text-destructive">
                 Excluir cadastro de {disciple.full_name}?
@@ -1308,7 +1670,7 @@ export function DiscipleEditorDialog({
         </DialogBody>
 
         <DialogFooter className="px-5 py-3.5 sm:px-6 border-t border-border/60 shrink-0 bg-muted/20 flex flex-col-reverse sm:flex-row sm:items-center gap-2 sm:justify-end pt-3.5">
-          {isEditing && disciple?.user_id === null && !confirmDelete && (
+          {!readOnly && isEditing && disciple?.user_id === null && !confirmDelete && (
             <Button
               type="button"
               variant="ghost"
@@ -1325,23 +1687,25 @@ export function DiscipleEditorDialog({
             onClick={() => onOpenChange(false)}
             className="h-11 min-h-[44px] w-full sm:w-auto text-xs rounded-xl px-5"
           >
-            Cancelar
+            {readOnly ? "Fechar" : "Cancelar"}
           </Button>
-          <Button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="h-11 min-h-[44px] w-full sm:w-auto text-xs font-semibold rounded-xl px-6"
-          >
-            {saving ? (
-              <>
-                <Loader2 data-icon="inline-start" className="animate-spin" />
-                <span>Salvando...</span>
-              </>
-            ) : (
-              <span>Salvar</span>
-            )}
-          </Button>
+          {!readOnly && (
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="h-11 min-h-[44px] w-full sm:w-auto text-xs font-semibold rounded-xl px-6"
+            >
+              {saving ? (
+                <>
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <span>Salvar</span>
+              )}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -24,9 +24,12 @@ import {
   Info,
   Layers,
   MessageSquare,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
+import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile";
+import { ResourcePermissionsDialog } from "@/components/gestao/ResourcePermissionsDialog";
 import { calculateTotalPrice, type FormField } from "@/lib/forms";
 import { formatDateBR } from "@/lib/utils";
 import {
@@ -114,6 +117,12 @@ interface GuestDataShape {
 export default function ManageEventDetail() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
+  const {
+    canCreateEvents,
+    canAssignResourcePermissions,
+    scopedEventIds,
+    loading: authLoading,
+  } = useCurrentUserProfile();
 
   const [retreat, setRetreat] = useState<Retreat | null>(null);
   const [registrations, setRegistrations] = useState<RegistrationWithDetails[]>([]);
@@ -147,6 +156,14 @@ export default function ManageEventDetail() {
   // Dialog & Modal states
   const [isEditEventOpen, setIsEditEventOpen] = useState(false);
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
+  const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (!authLoading && eventId && !canCreateEvents && !scopedEventIds.includes(eventId)) {
+      toast.error("Você não possui permissão para gerenciar este evento.");
+      navigate("/manage-events", { replace: true });
+    }
+  }, [authLoading, eventId, canCreateEvents, scopedEventIds, navigate]);
   const [homeGroupsMap, setHomeGroupsMap] = useState<Map<string, string>>(new Map());
   const [selectedRegistrationForDetail, setSelectedRegistrationForDetail] =
     useState<RegistrationWithDetails | null>(null);
@@ -1468,6 +1485,17 @@ export default function ManageEventDetail() {
             </Button>
           )}
 
+          {canAssignResourcePermissions && (
+            <Button
+              variant="outline"
+              onClick={() => setIsPermissionsDialogOpen(true)}
+              className="min-h-[44px] h-10 px-4 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-primary" />
+              <span>Permissões</span>
+            </Button>
+          )}
+
           <Button
             variant="outline"
             onClick={() => setIsPrintDialogOpen(true)}
@@ -1486,14 +1514,16 @@ export default function ManageEventDetail() {
             <span>Editar</span>
           </Button>
 
-          <Button
-            variant="ghost"
-            onClick={handleDeleteEvent}
-            className="min-h-[44px] h-10 px-3 text-red-500 hover:bg-red-500/10 dark:hover:bg-red-500/20 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Excluir</span>
-          </Button>
+          {canCreateEvents && (
+            <Button
+              variant="ghost"
+              onClick={handleDeleteEvent}
+              className="min-h-[44px] h-10 px-3 text-red-500 hover:bg-red-500/10 dark:hover:bg-red-500/20 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Excluir</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -2120,6 +2150,16 @@ export default function ManageEventDetail() {
         retreatRooms={retreatRooms}
         homeGroupsMap={homeGroupsMap}
       />
+
+      {canAssignResourcePermissions && (
+        <ResourcePermissionsDialog
+          open={isPermissionsDialogOpen}
+          onOpenChange={setIsPermissionsDialogOpen}
+          resourceType="event"
+          resourceId={retreat.id}
+          resourceTitle={retreat.title}
+        />
+      )}
     </div>
   );
 }

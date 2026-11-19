@@ -41,8 +41,6 @@ export function CommunityCalendarCard({
     loading: hookLoading,
   } = useChurchCalendar({
     publicOnly: !isChurchLinked,
-    initialMonth: 10,
-    initialYear: 2026,
   })
 
   const loading = parentLoading || hookLoading
@@ -69,7 +67,10 @@ export function CommunityCalendarCard({
 
   return (
     <>
-      <Card className="rounded-xl border-border/80 bg-card/70 shadow-xs backdrop-blur-xs transition-colors hover:border-primary/30 overflow-hidden">
+      <Card
+        id="calendario"
+        className="scroll-mt-20 rounded-xl border-border/80 bg-card/70 shadow-xs backdrop-blur-xs transition-colors hover:border-primary/30 overflow-hidden"
+      >
         <CardHeader className="space-y-2.5 pb-3">
           <div className="flex items-start justify-between gap-2">
             <div className="space-y-1">

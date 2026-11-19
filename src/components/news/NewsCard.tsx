@@ -215,9 +215,19 @@ export function NewsCard({
           {/* Ação rápida contextual (se habilitada) */}
           {showDirectActions && (
             <div>
-              {post.retreats && (
+              {post.retreats && post.retreats.status === "ativo" && (
                 <Badge variant="outline" className="text-[10px] border-primary/30 text-primary">
                   Inscrições Abertas
+                </Badge>
+              )}
+              {post.retreats && post.retreats.status === "encerrado" && (
+                <Badge variant="outline" className="text-[10px] border-border text-muted-foreground">
+                  Inscrições Encerradas
+                </Badge>
+              )}
+              {post.retreats && post.retreats.status === "cancelado" && (
+                <Badge variant="outline" className="text-[10px] border-destructive/30 text-destructive">
+                  Evento Cancelado
                 </Badge>
               )}
               {post.media_resources && (

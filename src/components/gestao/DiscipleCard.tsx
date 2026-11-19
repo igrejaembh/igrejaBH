@@ -1,8 +1,13 @@
-import { CornerDownLeft, ArrowLeftRight, Heart, Pencil, Users } from "lucide-react"
+import { CornerDownLeft, ArrowLeftRight, Heart, Pencil, Eye, Users } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import type { Database } from "@/lib/database.types"
-import { THEME_CLASSES } from "@/constants/colors"
+import {
+  ACCOUNT_TYPE_BADGE_CONFIG,
+  ROLE_BADGE_CONFIG,
+  THEME_CLASSES,
+} from "@/constants/colors"
+import type { AccountType, ProfileRole } from "@/lib/permissions"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 
@@ -10,6 +15,9 @@ export interface DiscipleCardProps {
   disciple: Profile
   isLeader?: boolean
   isNucleus?: boolean
+  accountType?: AccountType
+  roles?: ProfileRole[]
+  readOnly?: boolean
   disciplerName?: string | null
   spouseName?: string | null
   fatherName?: string | null
@@ -32,6 +40,9 @@ export function DiscipleCard({
   disciple,
   isLeader = false,
   isNucleus = false,
+  accountType,
+  roles = [],
+  readOnly = false,
   disciplerName,
   spouseName,
   fatherName,
@@ -44,12 +55,22 @@ export function DiscipleCard({
   const parentsNames = [fatherName, motherName].filter(Boolean).join(" & ")
   const showParents = !hasRelationshipMetadata && Boolean(parentsNames)
   const hasMetadata = hasRelationshipMetadata || showParents
+  const showAccountBadge = Boolean(accountType && accountType !== "disciple")
+  const visibleRoles = roles.filter((r) => r !== "publisher")
+  const formattedUnlinkedAt =
+    accountType === "unlinked" && disciple.unlinked_at
+      ? new Date(disciple.unlinked_at).toLocaleDateString("pt-BR")
+      : null
 
   return (
     <button
       type="button"
       onClick={() => onEdit(disciple)}
-      aria-label={`Editar informações de ${disciple.full_name}`}
+      aria-label={
+        readOnly
+          ? `Visualizar informações de ${disciple.full_name}`
+          : `Editar informações de ${disciple.full_name}`
+      }
       className="group flex h-full min-h-[44px] w-full cursor-pointer items-start gap-3 rounded-2xl border border-border/80 bg-card p-3.5 text-left shadow-xs transition-colors hover:border-primary/40 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:p-4"
     >
       {/* a. Avatar */}
@@ -64,7 +85,7 @@ export function DiscipleCard({
       </Avatar>
 
       <div className="min-w-0 flex-1">
-        {/* b. Nome + tags (Líder / Núcleo) + ícone discreto de edição */}
+        {/* b. Nome + tags + ícone discreto */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             <h3 className="min-w-0 truncate text-sm font-semibold leading-snug tracking-tight text-foreground sm:text-base">
@@ -80,12 +101,43 @@ export function DiscipleCard({
                 Núcleo
               </Badge>
             )}
+            {visibleRoles.map((role) => (
+              <Badge
+                key={role}
+                variant="outline"
+                className={ROLE_BADGE_CONFIG[role].className}
+              >
+                {ROLE_BADGE_CONFIG[role].label}
+              </Badge>
+            ))}
+            {showAccountBadge && accountType && (
+              <Badge
+                variant="outline"
+                className={ACCOUNT_TYPE_BADGE_CONFIG[accountType].className}
+              >
+                {ACCOUNT_TYPE_BADGE_CONFIG[accountType].label}
+              </Badge>
+            )}
           </div>
-          <Pencil
-            aria-hidden="true"
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground"
-          />
+          {readOnly ? (
+            <Eye
+              aria-hidden="true"
+              className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground"
+            />
+          ) : (
+            <Pencil
+              aria-hidden="true"
+              className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground"
+            />
+          )}
         </div>
+
+        {formattedUnlinkedAt && (
+          <p className="mt-1 text-[11px] font-medium text-muted-foreground">
+            Desvinculado em {formattedUnlinkedAt}
+            {disciple.unlinked_reason ? ` • ${disciple.unlinked_reason}` : ""}
+          </p>
+        )}
 
         {/* c, d, e: Discipulador, Companheiro e Cônjuge (ou Pais na ausência destes) */}
         {hasMetadata && (

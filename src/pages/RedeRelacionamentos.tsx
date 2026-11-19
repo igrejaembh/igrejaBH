@@ -18,11 +18,11 @@ import {
   Filter,
   Link2,
   ShieldAlert,
-  AlertCircle,
   HeartHandshake,
-  Baby,
   Home as HomeIcon,
   LayoutGrid,
+  Megaphone,
+  Eye,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,8 +42,14 @@ import { HomeGroupEditorDialog } from "@/components/gestao/HomeGroupEditorDialog
 import { GroupsDirectoryAndMap } from "@/components/gestao/GroupsDirectoryAndMap"
 import { RelationshipGraphView } from "@/components/gestao/RelationshipGraphView"
 import { RestrictedGroupLinkDialog } from "@/components/gestao/RestrictedGroupLinkDialog"
+import { PublisherRolesDialog } from "@/components/gestao/PublisherRolesDialog"
 import { disableRestrictedGroupMode } from "@/lib/restrictedMode"
 import { THEME_CLASSES } from "@/constants/colors"
+import {
+  isProfileRole,
+  normalizeAccountType,
+  type ProfileRole,
+} from "@/lib/permissions"
 import { SearchableSelect, type SearchableSelectOption } from "@/components/ui/searchable-select"
 import {
   getHomeGroupLeadersName,
@@ -93,13 +99,18 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
   const [fellowships, setFellowships] = useState<Fellowship[]>([])
   const [sectors, setSectors] = useState<Sector[]>([])
   const [leaderIds, setLeaderIds] = useState<Set<string>>(new Set())
+  const [profileRolesMap, setProfileRolesMap] = useState<Map<string, ProfileRole[]>>(new Map())
 
   // Papéis de acesso
-  const [isTier3, setIsTier3] = useState<boolean>(false) // Dev, Presbítero, Diácono
+  const [isTier3, setIsTier3] = useState<boolean>(false) // Dev, Presbítero, Diácono (visão global)
+  const [canEditPeople, setCanEditPeople] = useState<boolean>(false) // Dev ou Presbítero (edição global)
+  const [isDeacon, setIsDeacon] = useState<boolean>(false)
   const [isDev, setIsDev] = useState<boolean>(false)
-  const [isLeader, setIsLeader] = useState<boolean>(false) // Líder de GC
+  const [isLeader, setIsLeader] = useState<boolean>(false) // Líder de GC ou acesso de visualização
+  const [ledGroupIds, setLedGroupIds] = useState<Set<string>>(new Set())
   const [myHomeGroup, setMyHomeGroup] = useState<HomeGroup | null>(null)
   const [isUnauthorizedForGroup, setIsUnauthorizedForGroup] = useState<boolean>(false)
+  const [isPublisherDialogOpen, setIsPublisherDialogOpen] = useState<boolean>(false)
 
   // Abas de navegação
   const [activeTab, setActiveTab] = useState<"meu_grupo" | "outros_grupos">("meu_grupo")
@@ -111,7 +122,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
   const [groupByFamily, setGroupByFamily] = useState<boolean>(true)
   const [searchName, setSearchName] = useState<string>("")
   const [filterCategory, setFilterCategory] = useState<
-    "all" | "without_discipler" | "children" | "adults"
+    "all" | "without_discipler"
   >("all")
 
   const isWholeChurchView = !singleGroupMode && isTier3 && selectedGroupFilter === "all"
@@ -160,9 +171,34 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
 
       if (profileErr) throw profileErr
 
-      const tier3 = !!(myProfile.is_dev || myProfile.is_presbyter || myProfile.is_deacon)
-      const userIsDev = !!myProfile.is_dev
+      // Buscar papéis N:N para identificar permissões reais
+      const { data: profileRolesData } = await supabase
+        .from("profile_roles")
+        .select("profile_id, role")
+
+      const rolesMap = new Map<string, ProfileRole[]>()
+      ;(profileRolesData || []).forEach((row) => {
+        if (!isProfileRole(row.role)) return
+        const current = rolesMap.get(row.profile_id) || []
+        if (!current.includes(row.role)) current.push(row.role)
+        rolesMap.set(row.profile_id, current)
+      })
+      setProfileRolesMap(rolesMap)
+
+      const callerRoleSet = new Set<ProfileRole>(rolesMap.get(myProfile.id) || [])
+      if (myProfile.is_dev) callerRoleSet.add("dev")
+      if (myProfile.is_presbyter) callerRoleSet.add("presbyter")
+      if (myProfile.is_deacon) callerRoleSet.add("deacon")
+      if (myProfile.can_post) callerRoleSet.add("publisher")
+
+      const userIsDev = callerRoleSet.has("dev")
+      const userIsPresbyter = callerRoleSet.has("presbyter")
+      const userIsDeacon = callerRoleSet.has("deacon")
+      const userCanEditPeople = userIsDev || userIsPresbyter
+      const tier3 = userCanEditPeople || userIsDeacon
       setIsTier3(tier3)
+      setCanEditPeople(userCanEditPeople)
+      setIsDeacon(userIsDeacon)
       setIsDev(userIsDev)
 
       // Buscar Grupos Caseiros
@@ -178,6 +214,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
       const ledGroups = allGroups.filter(
         (g) => g.leader_1_id === myProfile.id || g.leader_2_id === myProfile.id
       )
+      setLedGroupIds(new Set(ledGroups.map((g) => g.id)))
       const isUserLeader = ledGroups.length > 0
 
       let primaryGroup: HomeGroup | null = null
@@ -318,14 +355,23 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
   }, [singleGroupMode, selectedGroupFilter, homeGroups, myHomeGroup])
 
   const presbyterIds = useMemo(
-    () => new Set(profiles.filter((p) => p.is_presbyter).map((p) => p.id)),
-    [profiles]
+    () =>
+      new Set(
+        profiles
+          .filter(
+            (p) => profileRolesMap.get(p.id)?.includes("presbyter") || p.is_presbyter
+          )
+          .map((p) => p.id)
+      ),
+    [profiles, profileRolesMap]
   )
 
   // KPIs consolidados da igreja para quando "Todos da Igreja" estiver selecionado
   const churchKpis = useMemo(() => {
-    // Apenas discípulos vinculados à igreja (usuários de estudo não entram na contagem do Corpo)
-    const churchProfiles = profiles.filter((p) => p.is_church_linked !== false)
+    // Apenas discípulos vinculados à igreja (estudo, participantes e desvinculados não entram na contagem do Corpo)
+    const churchProfiles = profiles.filter(
+      (p) => normalizeAccountType(p.account_type, p.is_church_linked) === "disciple"
+    )
     const totalDisciples = churchProfiles.length
     const adultDisciples = churchProfiles.filter((p) => !checkIsChild(p))
     const adultCount = adultDisciples.length
@@ -333,7 +379,7 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
 
     // Presbíteros e esposas de presbíteros (raízes do discipulado feminino) possuem cobertura mútua no Presbitério
     const isCoveredRoot = (p: Profile) =>
-      !!p.is_presbyter || !!(p.spouse_id && presbyterIds.has(p.spouse_id))
+      presbyterIds.has(p.id) || !!(p.spouse_id && presbyterIds.has(p.spouse_id))
 
     const withDiscipler = adultDisciples.filter(
       (p) => !!p.discipler_id || isCoveredRoot(p)
@@ -378,19 +424,27 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     }
   }, [profiles, homeGroups, sectors, fellowships, presbyterIds])
 
-  // Discípulos presentes no recorte atual (grupo focado, visitantes ou todos vinculados)
+  // Discípulos presentes no recorte atual (grupo focado, estudos/eventos, desvinculados ou todos vinculados)
   const activeScopeProfiles = useMemo(() => {
     return profiles.filter((p) => {
+      const accType = normalizeAccountType(p.account_type, p.is_church_linked)
       if (singleGroupMode) {
-        return myHomeGroup && p.home_group_id === myHomeGroup.id
+        return myHomeGroup && p.home_group_id === myHomeGroup.id && accType !== "unlinked"
       }
       if (!isTier3) {
-        return myHomeGroup && p.home_group_id === myHomeGroup.id
+        return myHomeGroup && p.home_group_id === myHomeGroup.id && accType !== "unlinked"
       }
-      if (selectedGroupFilter === "unlinked") return p.is_church_linked === false
-      if (selectedGroupFilter !== "all") return p.home_group_id === selectedGroupFilter
-      // Quando "Todos da Igreja", não incluir usuários de estudo
-      return p.is_church_linked !== false
+      if (selectedGroupFilter === "study") {
+        return accType === "study" || accType === "frequent_participant"
+      }
+      if (selectedGroupFilter === "unlinked") {
+        return accType === "unlinked"
+      }
+      if (selectedGroupFilter !== "all") {
+        return p.home_group_id === selectedGroupFilter && accType !== "unlinked"
+      }
+      // Quando "Todos da Igreja", incluir apenas discípulos vinculados ativos
+      return accType === "disciple"
     })
   }, [profiles, singleGroupMode, isTier3, myHomeGroup, selectedGroupFilter])
 
@@ -467,25 +521,28 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
   // Lista de irmãos filtrada
   const filteredDisciples = useMemo(() => {
     return profiles.filter((p) => {
-      // 1. Filtro de Grupo Caseiro
+      const accType = normalizeAccountType(p.account_type, p.is_church_linked)
+      // 1. Filtro de Grupo Caseiro / Tipo de Conta
       if (singleGroupMode) {
-        if (!myHomeGroup || p.home_group_id !== myHomeGroup.id) {
+        if (!myHomeGroup || p.home_group_id !== myHomeGroup.id || accType === "unlinked") {
           return false
         }
       } else if (!isTier3) {
         // Líder comum vê apenas os irmãos do seu próprio grupo
-        if (!myHomeGroup || p.home_group_id !== myHomeGroup.id) {
+        if (!myHomeGroup || p.home_group_id !== myHomeGroup.id || accType === "unlinked") {
           return false
         }
       } else {
-        // Nível 3 pode filtrar por grupo, todos ou apenas visitantes em estudos
-        if (selectedGroupFilter === "unlinked") {
-          if (p.is_church_linked !== false) return false
+        // Nível 3 pode filtrar por grupo, todos, estudos/eventos ou desvinculados
+        if (selectedGroupFilter === "study") {
+          if (accType !== "study" && accType !== "frequent_participant") return false
+        } else if (selectedGroupFilter === "unlinked") {
+          if (accType !== "unlinked") return false
         } else if (selectedGroupFilter !== "all") {
-          if (p.home_group_id !== selectedGroupFilter) return false
+          if (p.home_group_id !== selectedGroupFilter || accType === "unlinked") return false
         } else {
-          // Quando "Todos da Igreja", não incluir usuários de estudo
-          if (p.is_church_linked === false) return false
+          // Quando "Todos da Igreja", incluir apenas discípulos vinculados ativos
+          if (accType !== "disciple") return false
         }
       }
 
@@ -501,13 +558,9 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
       // 3. Filtro por Categoria
       const isChild = checkIsChild(p)
       const isCoveredRoot =
-        !!p.is_presbyter || !!(p.spouse_id && presbyterIds.has(p.spouse_id))
+        presbyterIds.has(p.id) || !!(p.spouse_id && presbyterIds.has(p.spouse_id))
       if (filterCategory === "without_discipler") {
         if (isChild || p.discipler_id || isCoveredRoot) return false
-      } else if (filterCategory === "children") {
-        if (!isChild) return false
-      } else if (filterCategory === "adults") {
-        if (isChild) return false
       }
 
       // 4. Filtro por Família (apenas na visualização da igreja inteira)
@@ -547,29 +600,32 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     [filteredDisciples]
   )
 
-  // Contadores para chips de status
+  // Contadores de escopo
   const counts = useMemo(() => {
     const isCoveredRoot = (p: Profile) =>
-      !!p.is_presbyter || !!(p.spouse_id && presbyterIds.has(p.spouse_id))
+      presbyterIds.has(p.id) || !!(p.spouse_id && presbyterIds.has(p.spouse_id))
     const total = activeScopeProfiles.length
-    const withDiscipler = activeScopeProfiles.filter(
-      (p) => !checkIsChild(p) && (!!p.discipler_id || isCoveredRoot(p))
-    ).length
     const withoutDiscipler = activeScopeProfiles.filter(
       (p) => !checkIsChild(p) && !p.discipler_id && !isCoveredRoot(p)
     ).length
-    const children = activeScopeProfiles.filter((p) => checkIsChild(p)).length
-    const adults = activeScopeProfiles.filter((p) => !checkIsChild(p)).length
     const totalFamilies = groupFamilies.filter((f) => !f.isIndividual).length
     const totalSingles = groupFamilies.filter((f) => f.isIndividual).length
 
-    return { total, withDiscipler, withoutDiscipler, children, adults, totalFamilies, totalSingles }
+    return { total, withoutDiscipler, totalFamilies, totalSingles }
   }, [activeScopeProfiles, groupFamilies, presbyterIds])
 
   // Opções para o seletor com pesquisa de Grupo Caseiro
   const groupFilterOptions: SearchableSelectOption[] = useMemo(() => {
-    const linkedCount = profiles.filter((p) => p.is_church_linked !== false).length
-    const unlinkedCount = profiles.filter((p) => p.is_church_linked === false).length
+    const linkedCount = profiles.filter(
+      (p) => normalizeAccountType(p.account_type, p.is_church_linked) === "disciple"
+    ).length
+    const studyCount = profiles.filter((p) => {
+      const acc = normalizeAccountType(p.account_type, p.is_church_linked)
+      return acc === "study" || acc === "frequent_participant"
+    }).length
+    const unlinkedCount = profiles.filter(
+      (p) => normalizeAccountType(p.account_type, p.is_church_linked) === "unlinked"
+    ).length
 
     const list: SearchableSelectOption[] = [
       {
@@ -579,15 +635,25 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         keywords: "todos geral igreja corpo",
       },
       {
+        value: "study",
+        label: `Estudos & Eventos (${studyCount})`,
+        description: "Contas de estudo bíblico e participantes frequentes",
+        keywords: "visitantes estudos bíblicos participantes frequentes eventos",
+      },
+      {
         value: "unlinked",
-        label: `Visitantes nos Estudos (${unlinkedCount})`,
-        description: "Pessoas em acolhimento nos estudos bíblicos",
-        keywords: "visitantes estudos bíblicos acolhimento",
+        label: `Desvinculados (${unlinkedCount})`,
+        description: "Histórico de irmãos que saíram da igreja",
+        keywords: "desvinculados saída desligamento",
       },
     ]
 
     homeGroups.forEach((hg) => {
-      const groupProfiles = profiles.filter((p) => p.home_group_id === hg.id)
+      const groupProfiles = profiles.filter(
+        (p) =>
+          p.home_group_id === hg.id &&
+          normalizeAccountType(p.account_type, p.is_church_linked) !== "unlinked"
+      )
       const count = groupProfiles.length
       const leaders = getHomeGroupLeadersName(hg, profileMap)
       const displayName = getHomeGroupDisplayName(hg, profileMap)
@@ -617,8 +683,25 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     return list
   }, [profiles, homeGroups, profileMap, sectorMap])
 
+  const canEditDisciple = useCallback(
+    (d: Profile) => {
+      if (canEditPeople) return true
+      if (singleGroupMode) return Boolean(myHomeGroup && ledGroupIds.has(myHomeGroup.id))
+      return Boolean(d.home_group_id && ledGroupIds.has(d.home_group_id))
+    },
+    [canEditPeople, singleGroupMode, myHomeGroup, ledGroupIds]
+  )
+
+  const canEditCurrentScope = useMemo(() => {
+    if (canEditPeople) return true
+    if (singleGroupMode) return Boolean(myHomeGroup && ledGroupIds.has(myHomeGroup.id))
+    if (!isTier3) return Boolean(myHomeGroup && ledGroupIds.has(myHomeGroup.id))
+    return Boolean(currentFocusedGroup && ledGroupIds.has(currentFocusedGroup.id))
+  }, [canEditPeople, singleGroupMode, isTier3, myHomeGroup, ledGroupIds, currentFocusedGroup])
+
   // Abertura dos modais
   const handleOpenAddDisciple = () => {
+    if (!canEditCurrentScope) return
     setEditingDisciple(null)
     setIsDiscipleDialogOpen(true)
   }
@@ -652,6 +735,9 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         disciple={disciple}
         isLeader={isGroupLeader}
         isNucleus={isNucleus}
+        accountType={normalizeAccountType(disciple.account_type, disciple.is_church_linked)}
+        roles={profileRolesMap.get(disciple.id) || []}
+        readOnly={!canEditDisciple(disciple)}
         disciplerName={discipler}
         spouseName={spouse}
         fatherName={father}
@@ -749,14 +835,34 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
     <div className="mx-auto w-full max-w-6xl space-y-6 pb-12">
       {/* 1. Cabeçalho Principal Mobile-First */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/70 pb-4">
-        <div>
+        <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             Gestão do Corpo
           </h1>
+          {isDeacon && !canEditPeople && (
+            <Badge
+              variant="outline"
+              className="gap-1.5 border-border/80 bg-muted/40 text-xs font-medium text-muted-foreground"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              <span>Somente leitura</span>
+            </Badge>
+          )}
         </div>
 
         {/* Ações de Cabeçalho */}
         <div className="flex flex-wrap items-center gap-2">
+          {(isDeacon || isDev) && !singleGroupMode && (
+            <Button
+              variant="outline"
+              onClick={() => setIsPublisherDialogOpen(true)}
+              className="h-11 min-h-[44px] gap-2 rounded-xl text-xs font-medium"
+            >
+              <Megaphone className="h-4 w-4 text-primary" />
+              <span>Publicadores</span>
+            </Button>
+          )}
+
           {isDev && (
             <Button
               variant="outline"
@@ -807,11 +913,13 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
             (activeTab === "meu_grupo"
               ? myHomeGroup?.id
               : selectedGroupFilter !== "all" &&
+                selectedGroupFilter !== "study" &&
                 selectedGroupFilter !== "unlinked" &&
                 selectedGroupFilter !== "my_or_all"
               ? selectedGroupFilter
               : undefined)
           }
+          readOnly={!canEditPeople}
           onSelectDisciple={handleOpenEditDisciple}
           onClose={() => setShowGraphView(false)}
         />
@@ -976,24 +1084,44 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                     </button>
                   </div>
                 </div>
-              ) : selectedGroupFilter === "unlinked" ? (
+              ) : selectedGroupFilter === "study" ? (
                 <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs">
                   <div className="flex items-center gap-2">
                     <Badge
                       variant="outline"
                       className={`${THEME_CLASSES.badgePriority} text-[11px] font-medium`}
                     >
-                      Estudos Bíblicos
+                      Estudos & Eventos
                     </Badge>
                     <span className="text-xs text-muted-foreground">
-                      {counts.total} pessoa(s) em acolhimento
+                      {counts.total} pessoa(s)
                     </span>
                   </div>
                   <h2 className="mt-1 text-lg font-bold text-foreground sm:text-xl">
-                    Visitantes nos Estudos
+                    Visitantes nos Estudos e Eventos
                   </h2>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Pessoas que estão participando das reuniões nas casas e conhecendo a palavra antes do vínculo pleno.
+                    Pessoas participando de estudos bíblicos ou inscritas em eventos da igreja antes do vínculo como discípulo.
+                  </p>
+                </div>
+              ) : selectedGroupFilter === "unlinked" ? (
+                <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-[11px] font-medium"
+                    >
+                      Desvinculados
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {counts.total} registro(s) de saída
+                    </span>
+                  </div>
+                  <h2 className="mt-1 text-lg font-bold text-foreground sm:text-xl">
+                    Irmãos Desvinculados
+                  </h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Registro histórico com data e motivo de saída. Mantêm apenas acesso equivalente a participantes de eventos.
                   </p>
                 </div>
               ) : currentFocusedGroup ? (
@@ -1059,14 +1187,17 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                     </div>
 
                     {/* Botão de Editar Dados do Grupo */}
-                    <Button
-                      variant="outline"
-                      onClick={() => handleOpenEditGroup(currentFocusedGroup)}
-                      className="h-11 min-h-[44px] gap-1.5 rounded-xl text-xs font-medium shrink-0"
-                    >
-                      <Edit className="h-3.5 w-3.5" />
-                      <span>Editar Dados do Grupo</span>
-                    </Button>
+                    {(canEditPeople ||
+                      (currentFocusedGroup && ledGroupIds.has(currentFocusedGroup.id))) && (
+                      <Button
+                        variant="outline"
+                        onClick={() => handleOpenEditGroup(currentFocusedGroup)}
+                        className="h-11 min-h-[44px] gap-1.5 rounded-xl text-xs font-medium shrink-0"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                        <span>Editar Dados do Grupo</span>
+                      </Button>
+                    )}
                   </div>
 
                   {/* 2 mini cards rápidos do grupo */}
@@ -1100,17 +1231,19 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                 </div>
               ) : null}
 
-              {/* Botão Grande "+ Cadastrar Novo Irmão" (Min Height 48px) */}
-              <Button
-                type="button"
-                onClick={handleOpenAddDisciple}
-                className="h-12 min-h-[48px] w-full gap-2 rounded-xl text-sm font-semibold shadow-xs"
-              >
-                <Plus className="h-5 w-5" />
-                <span>
-                  {currentFocusedGroup ? "Cadastrar Novo Irmão no Grupo" : "Cadastrar Novo Irmão"}
-                </span>
-              </Button>
+              {/* Botão Grande "+ Cadastrar Novo Irmão" (apenas Presbítero/Dev ou Líder do grupo em foco) */}
+              {canEditCurrentScope && (
+                <Button
+                  type="button"
+                  onClick={handleOpenAddDisciple}
+                  className="h-12 min-h-[48px] w-full gap-2 rounded-xl text-sm font-semibold shadow-xs"
+                >
+                  <Plus className="h-5 w-5" />
+                  <span>
+                    {currentFocusedGroup ? "Cadastrar Novo Irmão no Grupo" : "Cadastrar Novo Irmão"}
+                  </span>
+                </Button>
+              )}
 
               {/* Controles de Família (oculto no /meu-grupo; filtro por família apenas na visualização da igreja inteira) */}
               {!singleGroupMode && groupFamilies.length > 0 && (
@@ -1220,70 +1353,15 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                 )
               })()}
 
-              {/* Barra de Busca e Chips de Status */}
-              <div className="space-y-2.5">
-                <div className="relative">
-                  <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={searchName}
-                    onChange={(e) => setSearchName(e.target.value)}
-                    placeholder="Buscar irmão por nome, e-mail ou telefone..."
-                    className="h-11 min-h-[44px] rounded-xl pl-10 text-sm"
-                  />
-                </div>
-
-                {/* Chips de Filtro Simples e Diretos (Touch targets >= 44px) */}
-                <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-1">
-                  <button
-                    type="button"
-                    onClick={() => setFilterCategory("all")}
-                    className={`min-h-[44px] shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition-all cursor-pointer ${
-                      filterCategory === "all"
-                        ? "bg-foreground text-background shadow-xs"
-                        : "border border-border/80 bg-card text-muted-foreground hover:bg-muted/60"
-                    }`}
-                  >
-                    Todos ({counts.total})
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setFilterCategory("without_discipler")}
-                    className={`min-h-[44px] shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer ${
-                      filterCategory === "without_discipler"
-                        ? "bg-amber-600 text-white shadow-xs"
-                        : "border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
-                    }`}
-                  >
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    <span>Sem Discipulador ({counts.withoutDiscipler})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setFilterCategory("children")}
-                    className={`min-h-[44px] shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition-all inline-flex items-center gap-1.5 cursor-pointer ${
-                      filterCategory === "children"
-                        ? "bg-foreground text-background shadow-xs"
-                        : "border border-border/80 bg-card text-muted-foreground hover:bg-muted/60"
-                    }`}
-                  >
-                    <Baby className="h-3.5 w-3.5" />
-                    <span>Crianças ({counts.children})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setFilterCategory("adults")}
-                    className={`min-h-[44px] shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition-all cursor-pointer ${
-                      filterCategory === "adults"
-                        ? "bg-foreground text-background shadow-xs"
-                        : "border border-border/80 bg-card text-muted-foreground hover:bg-muted/60"
-                    }`}
-                  >
-                    Adultos ({counts.adults})
-                  </button>
-                </div>
+              {/* Barra de Busca */}
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchName}
+                  onChange={(e) => setSearchName(e.target.value)}
+                  placeholder="Buscar irmão por nome, e-mail ou telefone..."
+                  className="h-11 min-h-[44px] rounded-xl pl-10 text-sm"
+                />
               </div>
 
               {/* Lista de Cards dos Irmãos */}
@@ -1407,8 +1485,8 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
           {/* ========================================================= */}
           {activeTab === "outros_grupos" && (
             <div className="space-y-4">
-              {/* Botão de Gestão de Setores (Tier 3) */}
-              {isTier3 && (
+              {/* Botão de Gestão de Setores (Presbítero / Dev) */}
+              {canEditPeople && (
                 <div className="flex justify-end">
                   <Button
                     variant="outline"
@@ -1426,10 +1504,11 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
                 sectors={sectors}
                 allProfiles={profiles}
                 isTier3={!singleGroupMode && isTier3}
+                canManageGroups={!singleGroupMode && canEditPeople}
                 isDev={isDev}
                 myGroupId={myHomeGroup?.id}
                 onEditGroup={handleOpenEditGroup}
-                onCreateGroup={isTier3 ? handleOpenCreateGroup : undefined}
+                onCreateGroup={canEditPeople ? handleOpenCreateGroup : undefined}
                 onGenerateGroupLink={(hg) => {
                   setLinkGenSelectedGroupId(hg.id)
                   setIsLinkGenOpen(true)
@@ -1461,11 +1540,15 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         defaultHomeGroupId={
           singleGroupMode
             ? myHomeGroup?.id
-            : selectedGroupFilter !== "all" && selectedGroupFilter !== "unlinked"
+            : selectedGroupFilter !== "all" &&
+              selectedGroupFilter !== "study" &&
+              selectedGroupFilter !== "unlinked"
             ? selectedGroupFilter
             : myHomeGroup?.id
         }
         isTier3={!singleGroupMode && isTier3}
+        readOnly={editingDisciple ? !canEditDisciple(editingDisciple) : !canEditCurrentScope}
+        initialTransformToLinked={selectedGroupFilter === "study" || selectedGroupFilter === "unlinked"}
         lockGroupSelectionOnCreate={singleGroupMode}
         hideOptionalFieldsOnEdit={singleGroupMode}
         onSuccess={() => loadData(false)}
@@ -1478,16 +1561,16 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
         open={isHomeGroupDialogOpen}
         onOpenChange={setIsHomeGroupDialogOpen}
         homeGroup={editingHomeGroup}
-        isTier3={!singleGroupMode && isTier3}
+        isTier3={!singleGroupMode && canEditPeople}
         allProfiles={profiles}
         sectors={sectors}
         onSuccess={() => loadData(false)}
       />
 
       {/* ========================================================= */}
-      {/* MODAL 3: GERENCIAR SETORES (APENAS TIER 3 FORA DO MODO RESTRITO) */}
+      {/* MODAL 3: GERENCIAR SETORES (APENAS PRESBÍTERO / DEV)      */}
       {/* ========================================================= */}
-      {!singleGroupMode && isTier3 && (
+      {!singleGroupMode && canEditPeople && (
         <Dialog open={isSectorDialogOpen} onOpenChange={setIsSectorDialogOpen}>
           <DialogContent size="md" className="rounded-2xl p-5 sm:p-6">
             <DialogHeader>
@@ -1546,6 +1629,13 @@ export default function RedeRelacionamentos({ singleGroupMode = false }: RedeRel
           allProfiles={profiles}
           sectors={sectors}
           initialGroupId={linkGenSelectedGroupId}
+        />
+      )}
+
+      {(isDeacon || isDev) && (
+        <PublisherRolesDialog
+          open={isPublisherDialogOpen}
+          onOpenChange={setIsPublisherDialogOpen}
         />
       )}
     </div>

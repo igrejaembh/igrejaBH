@@ -67,6 +67,7 @@ import supabase from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
+import { invalidateCurrentUserProfileCache } from "@/hooks/useCurrentUserProfile";
 import { CardSelector, CardSelectorItem } from "@/components/ui/card-selector";
 import { 
     Dialog, 
@@ -467,7 +468,7 @@ export default function SignUp() {
                 password: data.password,
                 options: {
                     data: {
-                        account_mode: "visitor",
+                        account_mode: initialPrefill.fromGuestRetreat ? "frequent_participant" : "study",
                         full_name: data.fullName.trim(),
                         phone: data.phone?.trim() || null,
                         cpf: formattedVisitorCpf,
@@ -510,6 +511,7 @@ export default function SignUp() {
             let claimedCount = 0
             if (authData.session) {
                 claimedCount = await claimParticipantRegistrationsSafe()
+                await invalidateCurrentUserProfileCache()
             }
 
             clearGuestPrefillSession()
@@ -849,7 +851,7 @@ export default function SignUp() {
                                 </div>
                             </FieldGroup>
 
-                            <FieldSeparator>Dados para Retiros e Encontros (Opcional)</FieldSeparator>
+                            <FieldSeparator>Identificação e Dados para Eventos</FieldSeparator>
 
                             <FieldGroup>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -858,7 +860,7 @@ export default function SignUp() {
                                         control={visitorForm.control}
                                         render={({ field: { onChange, value, ...fieldProps }, fieldState }) => (
                                             <Field data-invalid={fieldState.invalid}>
-                                                <FieldLabel htmlFor="visitor-cpf">CPF (Opcional)</FieldLabel>
+                                                <FieldLabel htmlFor="visitor-cpf">CPF*</FieldLabel>
                                                 <Input
                                                     {...fieldProps}
                                                     id="visitor-cpf"
@@ -871,7 +873,7 @@ export default function SignUp() {
                                                     className="min-h-[44px]"
                                                 />
                                                 <FieldDescription>
-                                                    Usado para preencher inscrições e localizar registros anteriores.
+                                                    Obrigatório para reconhecer sua conta automaticamente em estudos e inscrições de eventos.
                                                 </FieldDescription>
                                                 <FieldError errors={[fieldState.error]} />
                                             </Field>

@@ -242,6 +242,10 @@ export type RetreatParticipantProfileValue = z.infer<
 
 export const visitorSignUpSchema = retreatParticipantBaseSchema
   .extend({
+    cpf: z
+      .string()
+      .min(1, { message: "CPF é obrigatório." })
+      .refine(validateCPF, { message: "CPF inválido." }),
     email: z.string().trim().email({ message: "E-mail inválido." }),
     password: passwordSchema,
     confirmPassword: z

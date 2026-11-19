@@ -51,16 +51,25 @@ const PermissionGuard = ({
   requireAdmin,
   requireManagement,
   requireCanPost,
+  requireManageEvents,
+  requireManageForms,
+  requireEventsAccess,
 }: {
   children: ReactNode
   requireAdmin?: boolean
   requireManagement?: boolean
   requireCanPost?: boolean
+  requireManageEvents?: boolean
+  requireManageForms?: boolean
+  requireEventsAccess?: boolean
 }) => (
   <ProtectedRoute
     requireAdmin={requireAdmin}
     requireManagement={requireManagement}
     requireCanPost={requireCanPost}
+    requireManageEvents={requireManageEvents}
+    requireManageForms={requireManageForms}
+    requireEventsAccess={requireEventsAccess}
   >
     {children}
   </ProtectedRoute>
@@ -250,11 +259,39 @@ function App() {
             {/* Protected Routes inside shared Layout */}
             <Route element={<AppLayout />}>
               <Route path="/dashboard" element={<Home />} />
-              <Route path="/noticias/nova" element={<CreatePost />} />
+              <Route
+                path="/noticias/nova"
+                element={
+                  <PermissionGuard requireCanPost>
+                    <CreatePost />
+                  </PermissionGuard>
+                }
+              />
               <Route path="/perfil" element={<Profile />} />
-              <Route path="/eventos" element={<Events />} />
-              <Route path="/minhas-inscricoes" element={<MyRegistrations />} />
-              <Route path="/eventos/inscricao/:registrationId" element={<ParticipantPortal />} />
+              <Route
+                path="/eventos"
+                element={
+                  <PermissionGuard requireEventsAccess>
+                    <Events />
+                  </PermissionGuard>
+                }
+              />
+              <Route
+                path="/minhas-inscricoes"
+                element={
+                  <PermissionGuard requireEventsAccess>
+                    <MyRegistrations />
+                  </PermissionGuard>
+                }
+              />
+              <Route
+                path="/eventos/inscricao/:registrationId"
+                element={
+                  <PermissionGuard requireEventsAccess>
+                    <ParticipantPortal />
+                  </PermissionGuard>
+                }
+              />
               <Route path="/mensagens" element={<Messages />} />
 
               <Route
@@ -280,7 +317,7 @@ function App() {
               <Route
                 path="/manage-events"
                 element={
-                  <PermissionGuard requireManagement>
+                  <PermissionGuard requireManageEvents>
                     <ManageEvents />
                   </PermissionGuard>
                 }
@@ -289,7 +326,7 @@ function App() {
               <Route
                 path="/manage-events/:eventId"
                 element={
-                  <PermissionGuard requireManagement>
+                  <PermissionGuard requireManageEvents>
                     <ManageEventDetail />
                   </PermissionGuard>
                 }
@@ -301,7 +338,7 @@ function App() {
               <Route
                 path="/gestao/formularios"
                 element={
-                  <PermissionGuard requireCanPost>
+                  <PermissionGuard requireManageForms>
                     <FormBuilder />
                   </PermissionGuard>
                 }

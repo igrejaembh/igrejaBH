@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.4"
   }
   public: {
     Tables: {
@@ -395,17 +395,17 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "posts_media_resource_id_fkey"
-            columns: ["media_resource_id"]
-            isOneToOne: false
-            referencedRelation: "media_resources"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "posts_form_id_fkey"
             columns: ["form_id"]
             isOneToOne: false
             referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "posts_media_resource_id_fkey"
+            columns: ["media_resource_id"]
+            isOneToOne: false
+            referencedRelation: "media_resources"
             referencedColumns: ["id"]
           },
           {
@@ -417,8 +417,111 @@ export type Database = {
           },
         ]
       }
+      profile_directory: {
+        Row: {
+          account_type: string
+          avatar_url: string | null
+          discipler_id: string | null
+          father_id: string | null
+          full_name: string
+          home_group_id: string | null
+          id: string
+          is_baptized: boolean
+          is_group_nucleus: boolean
+          mother_id: string | null
+          phone: string | null
+          spouse_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          account_type?: string
+          avatar_url?: string | null
+          discipler_id?: string | null
+          father_id?: string | null
+          full_name: string
+          home_group_id?: string | null
+          id: string
+          is_baptized?: boolean
+          is_group_nucleus?: boolean
+          mother_id?: string | null
+          phone?: string | null
+          spouse_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          account_type?: string
+          avatar_url?: string | null
+          discipler_id?: string | null
+          father_id?: string | null
+          full_name?: string
+          home_group_id?: string | null
+          id?: string
+          is_baptized?: boolean
+          is_group_nucleus?: boolean
+          mother_id?: string | null
+          phone?: string | null
+          spouse_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_directory_home_group_id_fkey"
+            columns: ["home_group_id"]
+            isOneToOne: false
+            referencedRelation: "home_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_directory_id_fkey"
+            columns: ["id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profile_roles: {
+        Row: {
+          created_at: string
+          granted_by: string | null
+          id: string
+          profile_id: string
+          role: string
+        }
+        Insert: {
+          created_at?: string
+          granted_by?: string | null
+          id?: string
+          profile_id: string
+          role: string
+        }
+        Update: {
+          created_at?: string
+          granted_by?: string | null
+          id?: string
+          profile_id?: string
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_roles_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_roles_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
+          account_type: string
           address_city: string | null
           address_complement: string | null
           address_neighborhood: string | null
@@ -428,15 +531,14 @@ export type Database = {
           address_zip_code: string | null
           avatar_url: string | null
           baptism_date: string | null
-          is_baptized: boolean
           birth_date: string | null
           can_post: boolean | null
           city_state: string | null
           cpf: string | null
           created_at: string
+          custom_discipler_name: string | null
           dependents_count: number | null
           dietary_restrictions: string | null
-          custom_discipler_name: string | null
           discipler_id: string | null
           drivers_license: string | null
           education_level: string | null
@@ -450,6 +552,7 @@ export type Database = {
           household_income: string | null
           housing_status: string | null
           id: string
+          is_baptized: boolean
           is_church_linked: boolean
           is_deacon: boolean | null
           is_dev: boolean | null
@@ -460,9 +563,13 @@ export type Database = {
           occupation: string | null
           phone: string | null
           spouse_id: string | null
+          unlinked_at: string | null
+          unlinked_by: string | null
+          unlinked_reason: string | null
           user_id: string | null
         }
         Insert: {
+          account_type?: string
           address_city?: string | null
           address_complement?: string | null
           address_neighborhood?: string | null
@@ -472,15 +579,14 @@ export type Database = {
           address_zip_code?: string | null
           avatar_url?: string | null
           baptism_date?: string | null
-          is_baptized?: boolean
           birth_date?: string | null
           can_post?: boolean | null
           city_state?: string | null
           cpf?: string | null
           created_at?: string
+          custom_discipler_name?: string | null
           dependents_count?: number | null
           dietary_restrictions?: string | null
-          custom_discipler_name?: string | null
           discipler_id?: string | null
           drivers_license?: string | null
           education_level?: string | null
@@ -494,6 +600,7 @@ export type Database = {
           household_income?: string | null
           housing_status?: string | null
           id?: string
+          is_baptized?: boolean
           is_church_linked?: boolean
           is_deacon?: boolean | null
           is_dev?: boolean | null
@@ -504,9 +611,13 @@ export type Database = {
           occupation?: string | null
           phone?: string | null
           spouse_id?: string | null
+          unlinked_at?: string | null
+          unlinked_by?: string | null
+          unlinked_reason?: string | null
           user_id?: string | null
         }
         Update: {
+          account_type?: string
           address_city?: string | null
           address_complement?: string | null
           address_neighborhood?: string | null
@@ -516,15 +627,14 @@ export type Database = {
           address_zip_code?: string | null
           avatar_url?: string | null
           baptism_date?: string | null
-          is_baptized?: boolean
           birth_date?: string | null
           can_post?: boolean | null
           city_state?: string | null
           cpf?: string | null
           created_at?: string
+          custom_discipler_name?: string | null
           dependents_count?: number | null
           dietary_restrictions?: string | null
-          custom_discipler_name?: string | null
           discipler_id?: string | null
           drivers_license?: string | null
           education_level?: string | null
@@ -538,6 +648,7 @@ export type Database = {
           household_income?: string | null
           housing_status?: string | null
           id?: string
+          is_baptized?: boolean
           is_church_linked?: boolean
           is_deacon?: boolean | null
           is_dev?: boolean | null
@@ -548,6 +659,9 @@ export type Database = {
           occupation?: string | null
           phone?: string | null
           spouse_id?: string | null
+          unlinked_at?: string | null
+          unlinked_by?: string | null
+          unlinked_reason?: string | null
           user_id?: string | null
         }
         Relationships: [
@@ -582,6 +696,13 @@ export type Database = {
           {
             foreignKeyName: "profiles_spouse_id_fkey"
             columns: ["spouse_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profiles_unlinked_by_fkey"
+            columns: ["unlinked_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -751,6 +872,92 @@ export type Database = {
           },
         ]
       }
+      resource_permissions: {
+        Row: {
+          created_at: string
+          granted_by: string | null
+          id: string
+          profile_id: string
+          resource_id: string
+          resource_type: string
+        }
+        Insert: {
+          created_at?: string
+          granted_by?: string | null
+          id?: string
+          profile_id: string
+          resource_id: string
+          resource_type: string
+        }
+        Update: {
+          created_at?: string
+          granted_by?: string | null
+          id?: string
+          profile_id?: string
+          resource_id?: string
+          resource_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "resource_permissions_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "resource_permissions_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retreat_batches: {
+        Row: {
+          created_at: string
+          end_at: string
+          id: string
+          max_spots: number | null
+          name: string
+          price: number
+          retreat_id: string
+          sort_order: number
+          start_at: string
+        }
+        Insert: {
+          created_at?: string
+          end_at: string
+          id?: string
+          max_spots?: number | null
+          name: string
+          price?: number
+          retreat_id: string
+          sort_order?: number
+          start_at: string
+        }
+        Update: {
+          created_at?: string
+          end_at?: string
+          id?: string
+          max_spots?: number | null
+          name?: string
+          price?: number
+          retreat_id?: string
+          sort_order?: number
+          start_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retreat_batches_retreat_id_fkey"
+            columns: ["retreat_id"]
+            isOneToOne: false
+            referencedRelation: "retreats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       retreat_expense_attachments: {
         Row: {
           created_at: string
@@ -805,50 +1012,6 @@ export type Database = {
             columns: ["uploaded_by"]
             isOneToOne: false
             referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      retreat_batches: {
-        Row: {
-          created_at: string
-          end_at: string
-          id: string
-          max_spots: number | null
-          name: string
-          price: number
-          retreat_id: string
-          sort_order: number
-          start_at: string
-        }
-        Insert: {
-          created_at?: string
-          end_at: string
-          id?: string
-          max_spots?: number | null
-          name: string
-          price?: number
-          retreat_id: string
-          sort_order?: number
-          start_at: string
-        }
-        Update: {
-          created_at?: string
-          end_at?: string
-          id?: string
-          max_spots?: number | null
-          name?: string
-          price?: number
-          retreat_id?: string
-          sort_order?: number
-          start_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "retreat_batches_retreat_id_fkey"
-            columns: ["retreat_id"]
-            isOneToOne: false
-            referencedRelation: "retreats"
             referencedColumns: ["id"]
           },
         ]
@@ -914,7 +1077,7 @@ export type Database = {
           retreat_id: string
           sender_name: string
           sender_profile_id: string | null
-          sender_role: "participant" | "organizer"
+          sender_role: string
         }
         Insert: {
           created_at?: string
@@ -925,7 +1088,7 @@ export type Database = {
           retreat_id: string
           sender_name: string
           sender_profile_id?: string | null
-          sender_role: "participant" | "organizer"
+          sender_role: string
         }
         Update: {
           created_at?: string
@@ -936,7 +1099,7 @@ export type Database = {
           retreat_id?: string
           sender_name?: string
           sender_profile_id?: string | null
-          sender_role?: "participant" | "organizer"
+          sender_role?: string
         }
         Relationships: [
           {
@@ -1118,6 +1281,61 @@ export type Database = {
           },
         ]
       }
+      study_notes: {
+        Row: {
+          content: string
+          created_at: string | null
+          id: string
+          media_resource_id: string | null
+          profile_id: string
+          study_id: string | null
+          title: string
+          updated_at: string | null
+        }
+        Insert: {
+          content?: string
+          created_at?: string | null
+          id?: string
+          media_resource_id?: string | null
+          profile_id: string
+          study_id?: string | null
+          title?: string
+          updated_at?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string | null
+          id?: string
+          media_resource_id?: string | null
+          profile_id?: string
+          study_id?: string | null
+          title?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_notes_media_resource_id_fkey"
+            columns: ["media_resource_id"]
+            isOneToOne: false
+            referencedRelation: "media_resources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_notes_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_notes_study_id_fkey"
+            columns: ["study_id"]
+            isOneToOne: false
+            referencedRelation: "studies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       study_steps: {
         Row: {
           created_at: string | null
@@ -1203,82 +1421,18 @@ export type Database = {
           },
         ]
       }
-      study_notes: {
-        Row: {
-          content: string
-          created_at: string | null
-          id: string
-          media_resource_id: string | null
-          profile_id: string
-          study_id: string | null
-          title: string
-          updated_at: string | null
-        }
-        Insert: {
-          content?: string
-          created_at?: string | null
-          id?: string
-          media_resource_id?: string | null
-          profile_id: string
-          study_id?: string | null
-          title?: string
-          updated_at?: string | null
-        }
-        Update: {
-          content?: string
-          created_at?: string | null
-          id?: string
-          media_resource_id?: string | null
-          profile_id?: string
-          study_id?: string | null
-          title?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "study_notes_media_resource_id_fkey"
-            columns: ["media_resource_id"]
-            isOneToOne: false
-            referencedRelation: "media_resources"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "study_notes_profile_id_fkey"
-            columns: ["profile_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "study_notes_study_id_fkey"
-            columns: ["study_id"]
-            isOneToOne: false
-            referencedRelation: "studies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      claim_participant_registrations: {
-        Args: Record<PropertyKey, never>
-        Returns: number
-      }
-      checkin_registration_by_qr: {
-        Args: { p_qr_token: string; p_retreat_id: string }
-        Returns: Json
-      }
-      get_retreat_batch_counts: {
-        Args: { p_retreat_ids: string[] }
-        Returns: {
-          active_count: number
-          batch_id: string
-          retreat_id: string
-        }[]
-      }
+      can_manage_event: { Args: { p_retreat_id: string }; Returns: boolean }
+      can_manage_events_any: { Args: never; Returns: boolean }
+      can_manage_form: { Args: { p_form_id: string }; Returns: boolean }
+      can_manage_people: { Args: { p_group_id?: string }; Returns: boolean }
+      can_post_any: { Args: never; Returns: boolean }
+      can_post_news: { Args: { p_retreat_id?: string }; Returns: boolean }
+      can_view_people: { Args: never; Returns: boolean }
       cancel_and_request_refund: {
         Args: {
           p_pix_key?: string | null
@@ -1310,9 +1464,9 @@ export type Database = {
           full_name: string
           gender: string
           has_baptism_date: boolean
-          is_baptized?: boolean
           household_income: string
           housing_status: string
+          is_baptized: boolean
           is_linked: boolean
           marital_status: string
           occupation: string
@@ -1320,17 +1474,28 @@ export type Database = {
           profile_id: string
         }[]
       }
-      close_expired_retreats: {
-        Args: Record<PropertyKey, never>
-        Returns: number
-      }
-      get_participant_portal_data: {
-        Args: {
-          p_portal_token?: string | null
-          p_registration_id?: string | null
-        }
+      checkin_registration_by_qr: {
+        Args: { p_qr_token: string; p_retreat_id: string }
         Returns: Json
       }
+      claim_participant_registrations: { Args: never; Returns: number }
+      close_expired_retreats: { Args: never; Returns: number }
+      current_account_type: { Args: never; Returns: string }
+      current_profile_id: { Args: never; Returns: string }
+      get_participant_portal_data: {
+        Args: { p_portal_token?: string | null; p_registration_id?: string | null }
+        Returns: Json
+      }
+      get_retreat_batch_counts: {
+        Args: { p_retreat_ids: string[] }
+        Returns: {
+          active_count: number
+          batch_id: string
+          retreat_id: string
+        }[]
+      }
+      has_role: { Args: { p_role: string }; Returns: boolean }
+      is_gc_leader: { Args: { p_group_id?: string }; Returns: boolean }
       patch_retreat_sheet_metadata: {
         Args: { p_metadata: Json; p_retreat_id: string; p_sheet_name: string }
         Returns: undefined
@@ -1357,7 +1522,7 @@ export type Database = {
       }
       send_participant_portal_message: {
         Args: {
-          p_message: string
+          p_message?: string
           p_portal_token?: string | null
           p_registration_id?: string | null
         }
@@ -1365,7 +1530,7 @@ export type Database = {
       }
       update_participant_flight_details: {
         Args: {
-          p_flight_details: Json
+          p_flight_details?: Json
           p_portal_token?: string | null
           p_registration_id?: string | null
         }

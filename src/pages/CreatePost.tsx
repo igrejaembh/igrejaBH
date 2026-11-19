@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/select"
 import { useState, useRef, useEffect } from "react"
 import supabase from "@/lib/supabase"
+import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile"
 import { toast } from "sonner"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
@@ -54,6 +55,9 @@ export default function CreatePost() {
   const initialRetreatId = searchParams.get("retreatId") || ""
   const initialLabel = searchParams.get("label") || ""
 
+  const { canPostGeneral, scopedEventIds } = useCurrentUserProfile()
+  const isEventScopedOnly = !canPostGeneral
+
   const [submitting, setSubmitting] = useState(false)
   const [retreats, setRetreats] = useState<RetreatOption[]>([])
 
@@ -62,7 +66,7 @@ export default function CreatePost() {
     defaultValues: {
       title: "",
       content: "",
-      category: initialRetreatId ? "evento" : "geral",
+      category: initialRetreatId || isEventScopedOnly ? "evento" : "geral",
       isPublic: true,
       isPublished: true,
       imageUrls: [],
@@ -75,6 +79,15 @@ export default function CreatePost() {
       formId: null,
     },
   })
+
+  useEffect(() => {
+    if (isEventScopedOnly) {
+      form.setValue("category", "evento")
+      if (!form.getValues("retreatId") && scopedEventIds.length === 1) {
+        form.setValue("retreatId", scopedEventIds[0])
+      }
+    }
+  }, [isEventScopedOnly, scopedEventIds, form])
 
   const [selectedImages, setSelectedImages] = useState<
     { file: File; id: string }[]
@@ -92,12 +105,16 @@ export default function CreatePost() {
         .order("created_at", { ascending: false })
 
       if (data) {
-        setRetreats(data)
+        setRetreats(
+          isEventScopedOnly
+            ? data.filter((r) => scopedEventIds.includes(r.id))
+            : data
+        )
       }
     }
 
     loadRetreats()
-  }, [])
+  }, [isEventScopedOnly, scopedEventIds])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -119,6 +136,12 @@ export default function CreatePost() {
   }
 
   async function onSubmit(data: PostValue) {
+    if (isEventScopedOnly) {
+      if (!data.retreatId || !scopedEventIds.includes(data.retreatId)) {
+        toast.error("Selecione um evento autorizado para vincular este comunicado.")
+        return
+      }
+    }
     setSubmitting(true)
 
     const operation = async () => {
@@ -268,6 +291,7 @@ export default function CreatePost() {
                       <FieldLabel>Tipo de Publicação*</FieldLabel>
                       <Select
                         value={field.value}
+                        disabled={isEventScopedOnly}
                         onValueChange={(val) => {
                           field.onChange(val)
                           // Se for pedido de oração, default para não-público (sensível)

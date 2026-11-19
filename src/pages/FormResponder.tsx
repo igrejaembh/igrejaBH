@@ -89,8 +89,7 @@ type ResponderProfile = Pick<
   | "dietary_restrictions"
   | "emergency_contact"
   | "is_dev"
-  | "is_presbyter"
-  | "can_post"
+  | "is_deacon"
 >
 
 function isSpouseOrRelativeField(label: string, fid: string): boolean {
@@ -305,7 +304,7 @@ export default function FormResponder() {
           const { data: profileData } = await supabase
             .from("profiles")
             .select(
-              "id, full_name, email, phone, cpf, birth_date, gender, city_state, address_city, address_state, dietary_restrictions, emergency_contact, is_dev, is_presbyter, can_post"
+              "id, full_name, email, phone, cpf, birth_date, gender, city_state, address_city, address_state, dietary_restrictions, emergency_contact, is_dev, is_deacon"
             )
             .eq("user_id", session.user.id)
             .single()
@@ -313,13 +312,31 @@ export default function FormResponder() {
           if (profileData) {
             setUserProfile(profileData)
             setProfileId(profileData.id)
-            setCanPost(
-              !!(
-                profileData.is_dev ||
-                profileData.is_presbyter ||
-                profileData.can_post
-              )
-            )
+
+            const { data: roleRows } = await supabase
+              .from("profile_roles")
+              .select("role")
+              .eq("profile_id", profileData.id)
+
+            const roleSet = new Set((roleRows || []).map((r) => r.role))
+            let canAccessFormMgmt =
+              !!profileData.is_dev ||
+              !!profileData.is_deacon ||
+              roleSet.has("dev") ||
+              roleSet.has("deacon")
+
+            if (!canAccessFormMgmt && formId) {
+              const { data: scopedPerm } = await supabase
+                .from("resource_permissions")
+                .select("id")
+                .eq("profile_id", profileData.id)
+                .eq("resource_type", "form")
+                .eq("resource_id", formId)
+                .maybeSingle()
+              if (scopedPerm) canAccessFormMgmt = true
+            }
+
+            setCanPost(canAccessFormMgmt)
           }
         } else {
           setUser(null)
