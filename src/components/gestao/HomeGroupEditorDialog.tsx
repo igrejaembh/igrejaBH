@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import {
   Dialog,
   DialogContent,
@@ -13,8 +13,93 @@ import { Label } from "@/components/ui/label"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { MapPin, Clock, Calendar, Users, Loader2, Search } from "lucide-react"
 import { toast } from "sonner"
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  useMap,
+  useMapEvents,
+} from "react-leaflet"
+import "leaflet/dist/leaflet.css"
+import L from "leaflet"
+import markerIcon from "leaflet/dist/images/marker-icon.png"
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png"
+import markerShadow from "leaflet/dist/images/marker-shadow.png"
 import supabase from "@/lib/supabase"
 import type { Database } from "@/lib/database.types"
+
+const BELO_HORIZONTE_CENTER: [number, number] = [-19.9167, -43.9345]
+
+const groupPinIcon = L.icon({
+  iconUrl: markerIcon,
+  iconRetinaUrl: markerIcon2x,
+  shadowUrl: markerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+})
+
+function MapResizeAndCenterController({
+  coords,
+  open,
+}: {
+  coords: [number, number] | null
+  open: boolean
+}) {
+  const map = useMap()
+  const prevCoordsRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    map.invalidateSize()
+    const t1 = window.setTimeout(() => map.invalidateSize(), 120)
+    const t2 = window.setTimeout(() => map.invalidateSize(), 350)
+
+    const container = map.getContainer()
+    const observer =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            map.invalidateSize()
+          })
+        : null
+    observer?.observe(container)
+
+    return () => {
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+      observer?.disconnect()
+    }
+  }, [map, open])
+
+  useEffect(() => {
+    const key = coords ? `${coords[0]},${coords[1]}` : "default"
+    if (prevCoordsRef.current === key) return
+    prevCoordsRef.current = key
+
+    if (coords) {
+      map.setView(coords, Math.max(map.getZoom(), 16))
+    } else {
+      map.setView(BELO_HORIZONTE_CENTER, 12)
+    }
+  }, [coords, map])
+
+  return null
+}
+
+function MapClickHandler({
+  onSelectLocation,
+}: {
+  onSelectLocation: (lat: number, lng: number) => void
+}) {
+  useMapEvents({
+    click(e) {
+      onSelectLocation(e.latlng.lat, e.latlng.lng)
+    },
+  })
+  return null
+}
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"]
@@ -249,6 +334,17 @@ export function HomeGroupEditorDialog({
     }
   }
 
+  const mapCoords = useMemo<[number, number] | null>(
+    () => (lat !== null && lng !== null ? [lat, lng] : null),
+    [lat, lng]
+  )
+
+  const handleMapLocationChange = (nextLat: number, nextLng: number) => {
+    setLat(nextLat)
+    setLng(nextLng)
+    toast.info("Localização ajustada no mapa", { duration: 1500 })
+  }
+
   const handleSave = async () => {
     if (!locationText.trim()) {
       toast.error("Por favor, informe o endereço ou bairro do Grupo Caseiro.")
@@ -308,8 +404,17 @@ export function HomeGroupEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg" className="max-h-[90dvh] sm:max-w-2xl md:max-w-3xl lg:max-w-4xl flex flex-col p-0 overflow-hidden rounded-2xl gap-0 shadow-2xl">
-        <DialogHeader className="px-5 py-4 sm:px-6 border-b border-border/60 shrink-0 bg-background/95 backdrop-blur-xs">
+      <DialogContent
+        size="lg"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          if (e.currentTarget instanceof HTMLElement) {
+            e.currentTarget.focus()
+          }
+        }}
+        className="max-h-[90dvh] sm:max-w-2xl md:max-w-3xl lg:max-w-4xl flex flex-col p-0 overflow-hidden rounded-2xl gap-0 shadow-2xl"
+      >
+        <DialogHeader className="px-5 py-4 pr-14 sm:px-6 sm:pr-14 border-b border-border/60 shrink-0 bg-background/95 backdrop-blur-xs">
           <DialogTitle className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
             {isEditing ? "Editar Dados do Grupo Caseiro" : "Novo Grupo Caseiro"}
           </DialogTitle>
@@ -451,18 +556,64 @@ export function HomeGroupEditorDialog({
               </div>
             </div>
 
-            {lat && lng ? (
-              <div className="flex items-center gap-2.5 rounded-xl bg-card border border-border/80 p-3 text-xs text-foreground">
-                <MapPin className="h-4 w-4 shrink-0 text-primary" />
-                <span>
-                  Coordenadas salvas: {lat.toFixed(4)}, {lng.toFixed(4)} (visível no mapa interativo)
-                </span>
+            <div className="space-y-2">
+              <div className="relative h-56 sm:h-64 w-full rounded-xl overflow-hidden border border-border/80 bg-muted/20 isolate">
+                {open && (
+                  <MapContainer
+                    center={mapCoords ?? BELO_HORIZONTE_CENTER}
+                    zoom={mapCoords ? 16 : 12}
+                    scrollWheelZoom={false}
+                    className="h-full w-full z-0"
+                    style={{ height: "100%", width: "100%" }}
+                  >
+                    <MapResizeAndCenterController coords={mapCoords} open={open} />
+                    <MapClickHandler onSelectLocation={handleMapLocationChange} />
+                    <TileLayer
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                    {mapCoords && (
+                      <Marker
+                        position={mapCoords}
+                        icon={groupPinIcon}
+                        draggable={true}
+                        eventHandlers={{
+                          dragend: (e) => {
+                            const pos = e.target.getLatLng()
+                            handleMapLocationChange(pos.lat, pos.lng)
+                          },
+                        }}
+                      />
+                    )}
+                  </MapContainer>
+                )}
+                {!mapCoords && (
+                  <div className="pointer-events-none absolute inset-0 z-[400] flex items-end justify-center p-3">
+                    <div className="rounded-lg border border-border/80 bg-background/90 backdrop-blur-xs px-3 py-1.5 text-center text-[11px] font-medium text-foreground shadow-sm">
+                      Busque o endereço acima ou toque no mapa para marcar o local.
+                    </div>
+                  </div>
+                )}
               </div>
-            ) : (
-              <p className="text-[11px] text-muted-foreground">
-                Preencha o endereço e acione Buscar no Mapa para localizar as coordenadas no mapa interativo.
-              </p>
-            )}
+
+              {mapCoords ? (
+                <div className="flex items-start sm:items-center gap-2.5 rounded-xl bg-card border border-border/80 p-3 text-xs text-foreground">
+                  <MapPin className="h-4 w-4 shrink-0 text-primary mt-0.5 sm:mt-0" />
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p className="font-medium break-words">
+                      Coordenadas salvas: {mapCoords[0].toFixed(4)}, {mapCoords[1].toFixed(4)}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Toque no mapa ou arraste o marcador para ajustar a posição exata.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Preencha o endereço e acione Buscar no Mapa, ou toque diretamente no mapa para definir as coordenadas.
+                </p>
+              )}
+            </div>
           </div>
         </div>
 
