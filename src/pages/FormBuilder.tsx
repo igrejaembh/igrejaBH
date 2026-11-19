@@ -404,6 +404,16 @@ export default function FormBuilder() {
 
       // Se o usuário optou por publicar aviso no Mural da Igreja
       if (postAnnouncement) {
+        let authorProfileId: string | null = null
+        if (session?.user?.id) {
+          const { data: profileData } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("user_id", session.user.id)
+            .maybeSingle()
+          authorProfileId = profileData?.id ?? null
+        }
+
         const content = announcementText.trim()
           ? announcementText.trim()
           : (selectedForm.description?.trim() || `Novo formulário disponível para resposta: "${selectedForm.name}".`);
@@ -415,7 +425,7 @@ export default function FormBuilder() {
           form_id: selectedForm.id,
           is_public: !!selectedForm.isPublic,
           is_published: true,
-          author_id: session?.user?.id || null,
+          author_id: authorProfileId,
         })
 
         if (postErr) {

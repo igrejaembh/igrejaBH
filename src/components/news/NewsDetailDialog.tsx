@@ -299,10 +299,21 @@ export function NewsDetailDialog({
 
             {post.category === "encontro" && (
               <Button asChild variant="outline" className="min-h-[44px] w-full sm:w-auto">
-                <a href="#calendario">
-
-                  Ver no Calendário da Cidade
-                </a>
+                {isPublicView ? (
+                  location.pathname === "/" || location.pathname === "/landing" ? (
+                    <a href="#agenda" onClick={() => onOpenChange(false)}>
+                      Ver no Calendário da Cidade
+                    </a>
+                  ) : (
+                    <Link to="/#agenda" onClick={() => onOpenChange(false)}>
+                      Ver no Calendário da Cidade
+                    </Link>
+                  )
+                ) : (
+                  <a href="#calendario" onClick={() => onOpenChange(false)}>
+                    Ver no Calendário da Cidade
+                  </a>
+                )}
               </Button>
             )}
           </div>

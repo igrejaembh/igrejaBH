@@ -17,9 +17,22 @@ export function CalendarEventCard({
   showTypeBadge = true,
   className = "",
 }: CalendarEventCardProps) {
+  const isCrossMonth =
+    Boolean(event.dayEnd) &&
+    ((event.endMonth !== undefined && event.endMonth !== event.month) ||
+      (event.endYear !== undefined && event.endYear !== event.year))
+
   const dateString = event.dayEnd
-    ? `Dias ${event.day} a ${event.dayEnd}`
+    ? isCrossMonth && event.endMonth
+      ? `${event.day}/${event.month} a ${event.dayEnd}/${event.endMonth}`
+      : `Dias ${event.day} a ${event.dayEnd}`
     : `Dia ${event.day}`
+
+  const badgeText = event.dayEnd
+    ? isCrossMonth
+      ? `${event.day}/${event.month}`
+      : `${event.day}-${event.dayEnd}`
+    : `${event.day}`
 
   const handleClick = (e: React.MouseEvent) => {
     if (onSelectEvent) {
@@ -39,7 +52,7 @@ export function CalendarEventCard({
       {/* Square Date Badge */}
       <div className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg bg-primary/10 text-primary font-bold group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
         <span className="text-xs uppercase leading-none font-bold">
-          {event.dayEnd ? `${event.day}-${event.dayEnd}` : event.day}
+          {badgeText}
         </span>
       </div>
 
