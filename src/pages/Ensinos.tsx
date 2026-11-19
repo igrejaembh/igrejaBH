@@ -15,6 +15,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { TextEditor } from "@/components/TextEditor";
 import { fetchLatestVideos, type YouTubeVideo } from "@/lib/youtube";
 import type { Database } from "@/lib/database.types";
+import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile";
 
 // Modular study components
 import { StudyHeader } from "@/components/study/StudyHeader";
@@ -212,7 +213,8 @@ export default function Ensinos() {
         fetchProfileAndData();
     }, [loadDatabaseData]);
 
-    const canAddMaterial = Boolean(profile?.is_presbyter || profile?.is_deacon || profile?.is_dev);
+    const { canAddTeachingMaterial } = useCurrentUserProfile();
+    const canAddMaterial = canAddTeachingMaterial;
 
     // Auto-sync YouTube videos if leader
     useEffect(() => {

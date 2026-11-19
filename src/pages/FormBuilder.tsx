@@ -36,9 +36,12 @@ import {
   GripVertical,
   AlertTriangle,
   Users,
+  ShieldCheck,
 
   Bell,
 } from "lucide-react"
+import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile"
+import { ResourcePermissionsDialog } from "@/components/gestao/ResourcePermissionsDialog"
 import { FormPresentationEditor } from "@/components/forms/FormPresentationEditor"
 import { parseEndOfDay } from "@/lib/utils"
 import {
@@ -119,6 +122,16 @@ const mapDbSubmission = (dbSub: any): FormSubmission => {
 
 export default function FormBuilder() {
   const navigate = useNavigate()
+  const {
+    canCreateForms,
+    canAssignResourcePermissions,
+    scopedFormIds,
+  } = useCurrentUserProfile()
+
+  const [permissionsTargetForm, setPermissionsTargetForm] = useState<{
+    id: string
+    name: string
+  } | null>(null)
 
   // Page core states
   const [forms, setForms] = useState<FormTemplate[]>([])
@@ -162,7 +175,10 @@ export default function FormBuilder() {
         if (formsError) throw formsError
 
         const mappedForms = (dbForms || []).map(mapDbFormToTemplate)
-        setForms(mappedForms)
+        const visibleForms = canCreateForms
+          ? mappedForms
+          : mappedForms.filter((f) => scopedFormIds.includes(f.id))
+        setForms(visibleForms)
 
         // Fetch submissions from database
         const { data: dbSubs, error: subsError } = await supabase
@@ -205,7 +221,7 @@ export default function FormBuilder() {
     }
 
     loadData()
-  }, [])
+  }, [canCreateForms, scopedFormIds.join(",")])
 
   // Notion-style Click Outside to collapse active editor card
   useEffect(() => {
@@ -379,6 +395,27 @@ export default function FormBuilder() {
       setEditingFieldId(optionFieldWithNoOptions.id)
       setBuilderTab("edit")
       return
+    }
+
+    if (isFormConnectedToEvent) {
+      const hasRequiredCpf = selectedForm.fields.some(
+        (f) =>
+          (f.validationPreset === "cpf" ||
+            f.label.toLowerCase().includes("cpf")) &&
+          f.required
+      )
+      const hasRequiredEmail = selectedForm.fields.some(
+        (f) =>
+          (f.validationPreset === "email" ||
+            (f.type as string) === "email") &&
+          f.required
+      )
+      if (!hasRequiredCpf || !hasRequiredEmail) {
+        toast.error(
+          "Formulários vinculados a eventos exigem campos obrigatórios de CPF e E-mail para reconhecimento dos participantes."
+        )
+        return
+      }
     }
 
     try {
@@ -1135,33 +1172,35 @@ export default function FormBuilder() {
               </p>
             </div>
 
-            <div className="flex w-full flex-col gap-3 sm:flex-row md:w-auto">
-              <Button
-                onClick={handleImportJSON}
-                variant="outline"
-                className="h-11 w-full cursor-pointer rounded-md border-border/80 transition-all hover:bg-accent active:scale-95 sm:w-auto"
-              >
-                <Upload className="mr-2 h-4 w-4" />
-                Importar JSON
-              </Button>
+            {canCreateForms && (
+              <div className="flex w-full flex-col gap-3 sm:flex-row md:w-auto">
+                <Button
+                  onClick={handleImportJSON}
+                  variant="outline"
+                  className="h-11 w-full cursor-pointer rounded-md border-border/80 transition-all hover:bg-accent active:scale-95 sm:w-auto"
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Importar JSON
+                </Button>
 
-              <Button
-                onClick={handleCreateEventForm}
-                variant="outline"
-                className="h-11 w-full cursor-pointer rounded-md border-primary/40 text-primary hover:bg-primary/10 font-semibold active:scale-95 sm:w-auto"
-              >
-                <Calendar className="mr-2 h-4 w-4" />
-                Modelo para Eventos
-              </Button>
+                <Button
+                  onClick={handleCreateEventForm}
+                  variant="outline"
+                  className="h-11 w-full cursor-pointer rounded-md border-primary/40 text-primary hover:bg-primary/10 font-semibold active:scale-95 sm:w-auto"
+                >
+                  <Calendar className="mr-2 h-4 w-4" />
+                  Modelo para Eventos
+                </Button>
 
-              <Button
-                onClick={handleCreateNewForm}
-                className="h-11 w-full cursor-pointer rounded-md bg-primary px-5 font-bold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-95 sm:w-auto"
-              >
-                <Plus className="mr-2 h-5 w-5" />
-                Novo Formulário
-              </Button>
-            </div>
+                <Button
+                  onClick={handleCreateNewForm}
+                  className="h-11 w-full cursor-pointer rounded-md bg-primary px-5 font-bold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-95 sm:w-auto"
+                >
+                  <Plus className="mr-2 h-5 w-5" />
+                  Novo Formulário
+                </Button>
+              </div>
+            )}
           </header>
 
           {/* Grid of Forms */}
@@ -1203,16 +1242,18 @@ export default function FormBuilder() {
                   zero.
                 </p>
               </div>
-              <div className="flex flex-col sm:flex-row gap-3 mt-4">
-                <Button onClick={handleCreateEventForm} variant="outline" className="border-primary/50 text-primary hover:bg-primary/10">
-                  <Calendar className="mr-2 h-4 w-4" />
-                  Modelo para Eventos
-                </Button>
-                <Button onClick={handleCreateNewForm}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Criar Formulário em Branco
-                </Button>
-              </div>
+              {canCreateForms && (
+                <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                  <Button onClick={handleCreateEventForm} variant="outline" className="border-primary/50 text-primary hover:bg-primary/10">
+                    <Calendar className="mr-2 h-4 w-4" />
+                    Modelo para Eventos
+                  </Button>
+                  <Button onClick={handleCreateNewForm}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Criar Formulário em Branco
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -1365,15 +1406,32 @@ export default function FormBuilder() {
                           <Eye className="h-4.5 w-4.5" />
                         </Button>
 
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-10 w-10 shrink-0 cursor-pointer rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
-                          onClick={(e) => handleDuplicateForm(form, e)}
-                          title="Duplicar Formulário"
-                        >
-                          <Copy className="h-4.5 w-4.5" />
-                        </Button>
+                        {canCreateForms && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-10 w-10 shrink-0 cursor-pointer rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                            onClick={(e) => handleDuplicateForm(form, e)}
+                            title="Duplicar Formulário"
+                          >
+                            <Copy className="h-4.5 w-4.5" />
+                          </Button>
+                        )}
+
+                        {canAssignResourcePermissions && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-10 w-10 shrink-0 cursor-pointer rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setPermissionsTargetForm({ id: form.id, name: form.name })
+                            }}
+                            title="Permissões de Acesso"
+                          >
+                            <ShieldCheck className="h-4.5 w-4.5" />
+                          </Button>
+                        )}
 
                         <Button
                           size="icon"
@@ -1421,15 +1479,17 @@ export default function FormBuilder() {
                           </Button>
                         )}
 
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-10 w-10 shrink-0 cursor-pointer rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          onClick={(e) => handleDeleteForm(form.id, e)}
-                          title="Excluir Formulário"
-                        >
-                          <Trash2 className="h-4.5 w-4.5" />
-                        </Button>
+                        {canCreateForms && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-10 w-10 shrink-0 cursor-pointer rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            onClick={(e) => handleDeleteForm(form.id, e)}
+                            title="Excluir Formulário"
+                          >
+                            <Trash2 className="h-4.5 w-4.5" />
+                          </Button>
+                        )}
                       </div>
                     </CardFooter>
                   </Card>
@@ -2249,6 +2309,17 @@ export default function FormBuilder() {
             </div>
           )
         })()}
+      {permissionsTargetForm && (
+        <ResourcePermissionsDialog
+          open={Boolean(permissionsTargetForm)}
+          onOpenChange={(open) => {
+            if (!open) setPermissionsTargetForm(null)
+          }}
+          resourceType="form"
+          resourceId={permissionsTargetForm.id}
+          resourceTitle={permissionsTargetForm.name}
+        />
+      )}
     </div>
   )
 }

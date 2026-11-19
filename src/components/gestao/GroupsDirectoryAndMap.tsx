@@ -30,6 +30,7 @@ export interface GroupsDirectoryAndMapProps {
   sectors: Sector[]
   allProfiles: Profile[]
   isTier3: boolean
+  canManageGroups?: boolean
   isDev?: boolean
   myGroupId?: string | null
   onEditGroup: (hg: HomeGroup) => void
@@ -59,6 +60,7 @@ export function GroupsDirectoryAndMap({
   sectors,
   allProfiles,
   isTier3,
+  canManageGroups,
   isDev = false,
   myGroupId,
   onEditGroup,
@@ -66,6 +68,7 @@ export function GroupsDirectoryAndMap({
   onSelectGroupForMembers,
   onGenerateGroupLink,
 }: GroupsDirectoryAndMapProps) {
+  const canEditAnyGroup = canManageGroups ?? isTier3
   const [searchTerm, setSearchTerm] = useState<string>("")
   const [selectedSectorId, setSelectedSectorId] = useState<string>("all")
 
@@ -313,17 +316,19 @@ export function GroupsDirectoryAndMap({
                     </Button>
                   )}
 
-                  {/* Ações Especiais de Liderança (Tier 3 ou próprio grupo) */}
-                  {(isTier3 || isMyGroup) && (
+                  {/* Ações Especiais de Liderança */}
+                  {(canEditAnyGroup || isMyGroup || (isTier3 && onSelectGroupForMembers)) && (
                     <div className="flex items-center gap-2 pt-1">
-                      <Button
-                        variant="secondary"
-                        onClick={() => onEditGroup(hg)}
-                        className="h-11 min-h-[44px] flex-1 gap-1.5 rounded-xl text-xs font-medium"
-                      >
-                        <Edit className="h-3.5 w-3.5" />
-                        <span>Editar Grupo</span>
-                      </Button>
+                      {(canEditAnyGroup || isMyGroup) && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => onEditGroup(hg)}
+                          className="h-11 min-h-[44px] flex-1 gap-1.5 rounded-xl text-xs font-medium"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                          <span>Editar Grupo</span>
+                        </Button>
+                      )}
 
                       {isTier3 && onSelectGroupForMembers && (
                         <Button

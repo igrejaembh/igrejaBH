@@ -10,6 +10,7 @@ export interface SearchableSelectOption {
   description?: string
   badge?: string
   keywords?: string
+  featured?: boolean
 }
 
 export interface SearchableSelectProps {
@@ -376,6 +377,7 @@ export function SearchableSelect({
                   const isSelected = value === opt.value
                   const isHighlighted = highlightedIndex === index
                   const isCustom = opt.value.startsWith("custom:")
+                  const isFeatured = Boolean(opt.featured && !isCustom)
 
                   return (
                     <div
@@ -388,14 +390,18 @@ export function SearchableSelect({
                       onMouseEnter={() => setHighlightedIndex(index)}
                       className={cn(
                         "relative flex min-h-[44px] cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-xs sm:text-sm transition-colors",
-                        isHighlighted
+                        isFeatured
+                          ? isHighlighted
+                            ? "border border-primary/45 bg-primary/15 text-primary font-medium"
+                            : "border border-primary/35 bg-primary/10 text-primary font-medium hover:bg-primary/15"
+                          : isHighlighted
                           ? isCustom
                             ? "bg-amber-500/15 text-amber-900 dark:text-amber-200"
                             : "bg-accent text-accent-foreground"
                           : isCustom
                           ? "bg-amber-500/5 hover:bg-amber-500/10 text-amber-800 dark:text-amber-300"
                           : "hover:bg-muted/60 text-foreground",
-                        isSelected && !isCustom && "font-medium bg-primary/10 text-primary hover:bg-primary/15",
+                        isSelected && !isCustom && "font-medium bg-primary/15 text-primary hover:bg-primary/20",
                         isSelected && isCustom && "font-medium bg-amber-500/20 text-amber-900 dark:text-amber-200"
                       )}
                     >

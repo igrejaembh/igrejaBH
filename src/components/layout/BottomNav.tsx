@@ -9,19 +9,33 @@ interface BottomNavProps {
 
 export function BottomNav({ onOpenMenu }: BottomNavProps) {
   const location = useLocation()
-  const { isManagement } = useCurrentUserProfile()
+  const {
+    isManagement,
+    canManageEvents,
+    canViewEventsNav,
+  } = useCurrentUserProfile()
 
   const navItems = isManagement
     ? [
         { name: "Início", href: "/dashboard", icon: Home },
         { name: "Ensinos", href: "/ensinos", icon: BookOpen },
-        { name: "Eventos", href: "/manage-events", icon: Calendar },
+        canManageEvents
+          ? { name: "Eventos", href: "/manage-events", icon: Calendar }
+          : canViewEventsNav
+          ? { name: "Eventos", href: "/eventos", icon: Calendar }
+          : { name: "Perfil", href: "/perfil", icon: User },
         { name: "Corpo", href: "/gestao", icon: Users },
+      ]
+    : canViewEventsNav
+    ? [
+        { name: "Início", href: "/dashboard", icon: Home },
+        { name: "Ensinos", href: "/ensinos", icon: BookOpen },
+        { name: "Eventos", href: "/eventos", icon: Calendar },
+        { name: "Perfil", href: "/perfil", icon: User },
       ]
     : [
         { name: "Início", href: "/dashboard", icon: Home },
         { name: "Ensinos", href: "/ensinos", icon: BookOpen },
-        { name: "Eventos", href: "/eventos", icon: Calendar },
         { name: "Perfil", href: "/perfil", icon: User },
       ]
 

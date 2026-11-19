@@ -725,4 +725,46 @@ export const CHECKIN_FLAG_CLASSES = {
     "border-primary ring-2 ring-primary/30 bg-white dark:bg-zinc-900",
 } as const;
 
+// ==========================================
+// 12. TOKENS DE TIPO DE CONTA E PAPÉIS RBAC
+// ==========================================
+export const ACCOUNT_TYPE_BADGE_CONFIG = {
+  study: {
+    label: "Estudo",
+    className: THEME_CLASSES.badgeWarning,
+  },
+  frequent_participant: {
+    label: "Participante Frequente",
+    className: THEME_CLASSES.badgeInfo,
+  },
+  unlinked: {
+    label: "Desvinculado",
+    className: THEME_CLASSES.badgeDestructive,
+  },
+  disciple: {
+    label: "Discípulo",
+    className: THEME_CLASSES.badgePrimary,
+  },
+} as const;
+
+export const ROLE_BADGE_CONFIG = {
+  dev: {
+    label: "Desenvolvedor",
+    className: THEME_CLASSES.badgePriority,
+  },
+  presbyter: {
+    label: "Presbítero",
+    className: THEME_CLASSES.badgePriority,
+  },
+  deacon: {
+    label: "Diácono",
+    className: THEME_CLASSES.badgeWarning,
+  },
+  publisher: {
+    label: "Publicador",
+    className: THEME_CLASSES.badgeSuccess,
+  },
+} as const;
+
+
 

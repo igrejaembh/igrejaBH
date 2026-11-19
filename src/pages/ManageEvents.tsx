@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { Plus, Search, Calendar, Info } from "lucide-react";
 import { toast } from "sonner";
 import supabase from "@/lib/supabase";
+import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile";
 import { THEME_CLASSES } from "@/constants/colors";
 import {
   getEffectiveRetreatStatus,
@@ -30,6 +31,7 @@ type RetreatQueryResult = Retreat & {
 };
 
 export default function ManageEvents() {
+  const { canCreateEvents, scopedEventIds } = useCurrentUserProfile();
   const [retreats, setRetreats] = useState<RetreatWithForm[]>([]);
   const [registrationCounts, setRegistrationCounts] = useState<Record<string, number>>({});
   const [batchCountsByRetreat, setBatchCountsByRetreat] = useState<Record<string, Record<string, number>>>({});
@@ -46,7 +48,7 @@ export default function ManageEvents() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [canCreateEvents, scopedEventIds.join(",")]);
 
   async function fetchData() {
     setLoading(true);
@@ -95,7 +97,11 @@ export default function ManageEvents() {
         };
       });
 
-      setRetreats(formattedRetreats);
+      const visibleRetreats = canCreateEvents
+        ? formattedRetreats
+        : formattedRetreats.filter((r) => scopedEventIds.includes(r.id));
+
+      setRetreats(visibleRetreats);
       setRegistrationCounts(counts);
       setBatchCountsByRetreat(nextBatchCounts);
 
@@ -243,13 +249,15 @@ export default function ManageEvents() {
           </p>
         </div>
 
-        <Button
-          onClick={handleCreateClick}
-          className="min-h-[44px] h-11 px-5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-50 dark:bg-zinc-50 dark:hover:bg-zinc-200 dark:text-zinc-900 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-sm self-start sm:self-auto shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Novo Retiro</span>
-        </Button>
+        {canCreateEvents && (
+          <Button
+            onClick={handleCreateClick}
+            className="min-h-[44px] h-11 px-5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-50 dark:bg-zinc-50 dark:hover:bg-zinc-200 dark:text-zinc-900 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-sm self-start sm:self-auto shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Novo Retiro</span>
+          </Button>
+        )}
       </div>
 
       {/* Toolbar: Status Tabs & Search */}
@@ -358,7 +366,7 @@ export default function ManageEvents() {
                   : "Nenhum retiro cadastrado no momento. Use o botão acima para criar o primeiro encontro da comunidade."}
               </p>
             </div>
-            {!searchQuery && statusFilter === "todos" && (
+            {canCreateEvents && !searchQuery && statusFilter === "todos" && (
               <Button
                 onClick={handleCreateClick}
                 className="min-h-[44px] h-11 px-5 rounded-lg bg-zinc-900 text-zinc-50 hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200 text-xs font-bold cursor-pointer"
@@ -378,7 +386,7 @@ export default function ManageEvents() {
               registeredCount={registrationCounts[retreat.id] || 0}
               batchCounts={batchCountsByRetreat[retreat.id] || {}}
               onEdit={handleEditClick}
-              onDelete={handleDeleteClick}
+              onDelete={canCreateEvents ? handleDeleteClick : undefined}
               onActivate={handleActivateClick}
             />
           ))}

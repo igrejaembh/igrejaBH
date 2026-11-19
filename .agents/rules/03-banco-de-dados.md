@@ -1,7 +1,10 @@
 # Esquema de Dados (Supabase) e RLS
 
 ## 1. Tabelas Principais
-- `profiles`: Armazena dados pessoais, papéis (is_presbyter, is_deacon) e relacionamentos (discipler_id, home_group_id, spouse, etc).
+- `profiles`: Armazena dados pessoais sensíveis, tipo de vínculo (`account_type`: `study`, `frequent_participant`, `unlinked`, `disciple`), histórico de desligamento (`unlinked_at`, `unlinked_reason`, `unlinked_by`) e relacionamentos (`discipler_id`, `home_group_id`, `spouse_id`, etc). As flags booleanas legadas (`is_presbyter`, `is_deacon`, `is_dev`, `can_post`, `is_church_linked`) são mantidas sincronizadas por triggers no banco.
+- `profile_roles`: Relação N:N de papéis administrativos por discípulo (`dev`, `presbyter`, `deacon`, `publisher`), gerida conforme hierarquia (`dev` gerencia qualquer papel; `presbyter` gerencia `presbyter` e `deacon`; `deacon` gerencia `publisher`).
+- `resource_permissions`: Relação N:N de permissões delegadas por recurso específico (`resource_type`: `event` ou `form`, `resource_id`), permitindo que Diáconos/Devs autorizem discípulos a gerenciar eventos (e postar notícias apenas daquele evento) ou formulários específicos.
+- `profile_directory`: Tabela/diretório não sensível sincronizado automaticamente via trigger a partir de `profiles` (expondo apenas nome, avatar, telefone e relacionamentos básicos para feeds e cards de grupo, mantendo CPF, e-mail, renda e dados pessoais restritos em `profiles`).
 - `home_groups`: Define os locais de reunião, dia e líderes. Tem `lat` e `lng` para mapas. Relaciona-se com `sectors`.
 - `sectors`: Agrupamentos macro geográficos que contêm múltiplos Grupos Caseiros.
 - `fellowships`: Registra vínculos intencionais de companheirismo entre dois discípulos (`member_a_id`, `member_b_id`).

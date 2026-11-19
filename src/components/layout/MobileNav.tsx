@@ -8,7 +8,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import { navItems } from "./NavItems"
+import { navItems, isNavItemVisible } from "./NavItems"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import { ChurchLogo } from "@/components/icons/ChurchLogo"
@@ -25,17 +25,15 @@ interface MobileNavProps {
 export function MobileNav({ menuOpen: controlledOpen, onMenuOpenChange: setControlledOpen }: MobileNavProps) {
   const location = useLocation()
   const [internalOpen, setInternalOpen] = useState(false)
-  const { profile, isAdmin, isManagement, canPost } = useCurrentUserProfile()
+  const userState = useCurrentUserProfile()
+  const { profile } = userState
 
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen
   const setIsOpen = setControlledOpen !== undefined ? setControlledOpen : setInternalOpen
 
-  const filteredNavItems = navItems.filter((item) => {
-    if (item.requireAdmin && !isAdmin) return false
-    if (item.requireManagement && !isManagement) return false
-    if (item.requireCanPost && !canPost) return false
-    return true
-  })
+  const filteredNavItems = navItems.filter((item) =>
+    isNavItemVisible(item, userState)
+  )
 
   const getInitials = (name?: string) => {
     if (!name) return "D"

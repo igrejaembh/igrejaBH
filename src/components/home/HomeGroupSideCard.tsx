@@ -15,16 +15,16 @@ import {
 import type { Database } from "@/lib/database.types"
 import { THEME_CLASSES } from "@/constants/colors"
 
-type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"] & {
-  sectors?: Database["public"]["Tables"]["sectors"]["Row"] | null
-  leader_1?: Database["public"]["Tables"]["profiles"]["Row"] | null
-  leader_2?: Database["public"]["Tables"]["profiles"]["Row"] | null
-}
-
 type GroupMember = Pick<
   Database["public"]["Tables"]["profiles"]["Row"],
   "id" | "full_name" | "avatar_url" | "phone"
 >
+
+type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"] & {
+  sectors?: Database["public"]["Tables"]["sectors"]["Row"] | null
+  leader_1?: GroupMember | null
+  leader_2?: GroupMember | null
+}
 
 interface HomeGroupSideCardProps {
   homeGroup: HomeGroup | null

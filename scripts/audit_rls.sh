@@ -8,7 +8,7 @@ echo "🔍 Auditando RLS em $SQL_FILE..."
 
 # Captura tabelas criadas (com ou sem aspas, ignorando case)
 # Regex aprimorada para capturar o nome após public. e ignorar o próprio prefixo
-TABLES=$(grep -Ei "CREATE TABLE[[:space:]]+(public\.)?\"?([a-zA-Z0-9_]+)\"?" "$SQL_FILE" | sed -E 's/.*TABLE[[:space:]]+(public\.)?\"?([^"[:space:](]+)\"?.*/\2/I')
+TABLES=$(grep -Ei "CREATE TABLE[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?(public\.)?\"?([a-zA-Z0-9_]+)\"?" "$SQL_FILE" | sed -E 's/.*TABLE[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?(public\.)?\"?([^"[:space:](]+)\"?.*/\3/I')
 
 
 for table in $TABLES; do

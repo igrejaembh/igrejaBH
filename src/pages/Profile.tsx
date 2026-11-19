@@ -73,6 +73,11 @@ import {
 import { CompleteProfileDialog } from "@/components/profile/CompleteProfileDialog"
 import { EditRetreatProfileDialog } from "@/components/profile/EditRetreatProfileDialog"
 import { cn } from "@/lib/utils"
+import {
+  ACCOUNT_TYPE_LABELS,
+  normalizeAccountType,
+  type AccountType,
+} from "@/lib/permissions"
 
 export interface ChildProfile {
   id: string
@@ -91,10 +96,14 @@ interface UserProfile {
   user_id?: string | null
   full_name: string
   email: string
+  account_type: AccountType
+  unlinked_at?: string | null
+  unlinked_reason?: string | null
   is_church_linked: boolean
   is_dev: boolean
   is_presbyter: boolean
   is_deacon: boolean
+  is_publisher: boolean
   avatar_url?: string
   cpf?: string
   birth_date?: string
@@ -185,11 +194,7 @@ export default function Profile() {
         .select(
           `
             *,
-            home_groups:home_group_id (location_text),
-            discipler:discipler_id (full_name),
-            spouse:spouse_id (full_name),
-            father:father_id (full_name),
-            mother:mother_id (full_name)
+            home_groups:home_group_id (location_text)
           `
         )
 
@@ -211,21 +216,38 @@ export default function Profile() {
         }
         setIsOwnProfile(isOwn)
 
-        const getRelationName = (rel: unknown): string | undefined => {
-          if (!rel) return undefined
-          if (Array.isArray(rel)) {
-            return (rel[0] as { full_name?: string })?.full_name || undefined
-          }
-          return (rel as { full_name?: string }).full_name || undefined
+        // Carrega nomes das relações familiares/discipulado via profile_directory (não expõe dados sensíveis)
+        const relationIds = [
+          data.discipler_id,
+          data.spouse_id,
+          data.father_id,
+          data.mother_id,
+        ].filter((id): id is string => Boolean(id))
+
+        const relationMap = new Map<string, string>()
+        if (relationIds.length > 0) {
+          const { data: relRows } = await supabase
+            .from("profile_directory")
+            .select("id, full_name")
+            .in("id", relationIds)
+
+          relRows?.forEach((r) => relationMap.set(r.id, r.full_name))
         }
 
+        const { data: targetRolesData } = await supabase
+          .from("profile_roles")
+          .select("role")
+          .eq("profile_id", data.id)
+
+        const targetRoleSet = new Set(targetRolesData?.map((r) => r.role) || [])
+
         let spouseId = data.spouse_id || undefined
-        let spouseName = getRelationName(data.spouse)
+        let spouseName = spouseId ? relationMap.get(spouseId) : undefined
 
         if (!spouseId) {
           try {
             const { data: revSpouse } = await supabase
-              .from("profiles")
+              .from("profile_directory")
               .select("id, full_name")
               .eq("spouse_id", data.id)
               .maybeSingle()
@@ -242,10 +264,10 @@ export default function Profile() {
         let childrenList: ChildProfile[] = []
         try {
           const { data: childrenData, error: childrenError } = await supabase
-            .from("profiles")
-            .select("id, full_name, avatar_url, birth_date, baptism_date, is_baptized, gender, user_id, phone")
+            .from("profile_directory")
+            .select("id, full_name, avatar_url, is_baptized, user_id, phone")
             .or(`father_id.eq.${data.id},mother_id.eq.${data.id}`)
-            .order("birth_date", { ascending: true })
+            .order("full_name", { ascending: true })
 
           if (!childrenError && childrenData) {
             childrenList = childrenData
@@ -254,15 +276,24 @@ export default function Profile() {
           console.error("Erro ao buscar filhos:", childErr)
         }
 
+        const normalizedAccountType = normalizeAccountType(
+          data.account_type,
+          data.is_church_linked
+        )
+
         setProfile({
           id: data.id,
           user_id: data.user_id || undefined,
           full_name: data.full_name,
           email: isOwn ? (session.user.email || data.email || "") : (data.email || ""),
-          is_church_linked: !!data.is_church_linked,
-          is_dev: !!data.is_dev,
-          is_presbyter: !!data.is_presbyter,
-          is_deacon: !!data.is_deacon,
+          account_type: normalizedAccountType,
+          unlinked_at: data.unlinked_at || null,
+          unlinked_reason: data.unlinked_reason || null,
+          is_church_linked: normalizedAccountType === "disciple",
+          is_dev: targetRoleSet.has("dev") || !!data.is_dev,
+          is_presbyter: targetRoleSet.has("presbyter") || !!data.is_presbyter,
+          is_deacon: targetRoleSet.has("deacon") || !!data.is_deacon,
+          is_publisher: targetRoleSet.has("publisher") || !!data.can_post,
           avatar_url: data.avatar_url || undefined,
           cpf: data.cpf || undefined,
           birth_date: data.birth_date || undefined,
@@ -284,11 +315,14 @@ export default function Profile() {
           father_id: data.father_id || undefined,
           mother_id: data.mother_id || undefined,
           home_group_name: data.home_groups?.location_text || undefined,
-          discipler_name: getRelationName(data.discipler) || data.custom_discipler_name || undefined,
+          discipler_name:
+            (data.discipler_id ? relationMap.get(data.discipler_id) : undefined) ||
+            data.custom_discipler_name ||
+            undefined,
           is_custom_discipler: !data.discipler_id && Boolean(data.custom_discipler_name),
           spouse_name: spouseName,
-          father_name: getRelationName(data.father),
-          mother_name: getRelationName(data.mother),
+          father_name: data.father_id ? relationMap.get(data.father_id) : undefined,
+          mother_name: data.mother_id ? relationMap.get(data.mother_id) : undefined,
           occupation: data.occupation,
           education_level: data.education_level,
           employment_status: data.employment_status,
@@ -314,8 +348,9 @@ export default function Profile() {
     setLoadingMembers(true)
     try {
       const { data, error } = await supabase
-        .from("profiles")
+        .from("profile_directory")
         .select("id, full_name")
+        .eq("account_type", "disciple")
         .order("full_name")
       if (error) throw error
       setAllMembers(data || [])
@@ -527,13 +562,14 @@ export default function Profile() {
   if (!profile) return null
 
   const getRole = () => {
-    if (!profile.is_church_linked) {
-      return "Participante de Retiros & Estudos"
+    if (profile.account_type !== "disciple") {
+      return ACCOUNT_TYPE_LABELS[profile.account_type]
     }
     const roles = []
     if (profile.is_dev) roles.push("Desenvolvedor")
     if (profile.is_presbyter) roles.push("Presbítero")
     if (profile.is_deacon) roles.push("Diácono")
+    if (profile.is_publisher) roles.push("Publicador")
     if (roles.length === 0) roles.push("Discípulo")
     return roles.join(" • ")
   }
@@ -735,9 +771,19 @@ export default function Profile() {
           <div className="flex items-start gap-3">
             <InfoIcon className="size-5 text-primary shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="font-semibold text-foreground">Participante de Retiros &amp; Estudos</p>
+              <p className="font-semibold text-foreground">
+                {ACCOUNT_TYPE_LABELS[profile.account_type]}
+              </p>
               <p className="text-xs leading-relaxed">
-                Os dados salvos aqui preenchem automaticamente suas próximas inscrições em retiros e encontros. Se você já caminha na Igreja em Belo Horizonte, converse com seu discipulador ou líder de Grupo Caseiro para registrar o seu vínculo.
+                {profile.account_type === "study"
+                  ? "Sua conta está habilitada para leitura de estudos e anotações. Ao participar de um retiro ou evento, suas inscrições passarão a aparecer aqui automaticamente."
+                  : profile.account_type === "unlinked"
+                  ? `Perfil desvinculado${
+                      profile.unlinked_at
+                        ? ` em ${formatDate(profile.unlinked_at)}`
+                        : ""
+                    }. Você mantém acesso aos estudos e às suas inscrições em eventos.`
+                  : "Os dados salvos aqui preenchem automaticamente suas próximas inscrições em retiros e encontros. Se você já caminha na Igreja em Belo Horizonte, converse com seu discipulador ou líder de Grupo Caseiro para registrar o seu vínculo."}
               </p>
             </div>
           </div>
@@ -755,16 +801,18 @@ export default function Profile() {
               <PencilIcon className="size-3.5" />
               Editar Dados
             </Button>
-            <Button
-              asChild
-              size="sm"
-              className="min-h-[44px] rounded-xl font-bold gap-2 w-full sm:w-auto"
-            >
-              <Link to="/eventos">
-                Ver Retiros e Encontros
-                <ArrowRightIcon className="size-4" />
-              </Link>
-            </Button>
+            {profile.account_type !== "study" && (
+              <Button
+                asChild
+                size="sm"
+                className="min-h-[44px] rounded-xl font-bold gap-2 w-full sm:w-auto"
+              >
+                <Link to="/eventos">
+                  Ver Retiros e Encontros
+                  <ArrowRightIcon className="size-4" />
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
       )}

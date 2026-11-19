@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import supabase from "@/lib/supabase"
+import { normalizeAccountType } from "@/lib/permissions"
 import {
   PROFILE_SECTIONS,
   isSectionComplete,
@@ -59,8 +60,8 @@ export function ProfileCompletionBlocker() {
 
         if (profile) {
           // Bloqueia apenas discípulos vinculados à igreja.
-          // Usuários não vinculados têm acesso liberado sem obrigatoriedade de dados diaconais.
-          if (!profile.is_church_linked) {
+          // Contas de estudo, participantes frequentes e desvinculados não têm obrigatoriedade de dados diaconais.
+          if (normalizeAccountType(profile.account_type, profile.is_church_linked) !== "disciple") {
             setIsOpen(false)
             return
           }

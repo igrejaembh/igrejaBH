@@ -43,6 +43,7 @@ import {
   type RelationshipNodeRole,
 } from "@/constants/colors"
 import { getHomeGroupDisplayName } from "@/lib/homeGroupUtils"
+import { normalizeAccountType } from "@/lib/permissions"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
 type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"]
@@ -2113,6 +2114,7 @@ export interface RelationshipGraphViewProps {
   sectors: Sector[]
   leaderIds: Set<string>
   initialGroupId?: string
+  readOnly?: boolean
   onSelectDisciple?: (profile: Profile) => void
   onClose?: () => void
 }
@@ -2124,6 +2126,7 @@ export function RelationshipGraphView({
   sectors,
   leaderIds,
   initialGroupId,
+  readOnly = false,
   onSelectDisciple,
 }: RelationshipGraphViewProps) {
   const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("hierarchy")
@@ -2149,7 +2152,9 @@ export function RelationshipGraphView({
 
   // Construir dados base de todos os discípulos vinculados à igreja
   const { allChurchNodes, profileMap } = useMemo(() => {
-    const linkedProfiles = profiles.filter((p) => p.is_church_linked !== false)
+    const linkedProfiles = profiles.filter(
+      (p) => normalizeAccountType(p.account_type, p.is_church_linked) === "disciple"
+    )
     const pMap = new Map(linkedProfiles.map((p) => [p.id, p]))
     const groupMap = new Map(homeGroups.map((g) => [g.id, g]))
     const sectorMap = new Map(sectors.map((s) => [s.id, s]))
@@ -3260,11 +3265,12 @@ export function RelationshipGraphView({
               {onSelectDisciple && (
                 <Button
                   type="button"
+                  variant={readOnly ? "outline" : "default"}
                   onClick={() => onSelectDisciple(selectedNodeData.rawProfile)}
                   className="h-11 min-h-[44px] flex-1 gap-1.5 rounded-xl text-xs font-semibold"
                 >
-                  <Edit className="h-4 w-4" />
-                  <span>Editar Vínculos</span>
+                  {readOnly ? <Eye className="h-4 w-4" /> : <Edit className="h-4 w-4" />}
+                  <span>{readOnly ? "Visualizar Cadastro" : "Editar Vínculos"}</span>
                 </Button>
               )}
             </div>

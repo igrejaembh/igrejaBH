@@ -1,46 +1,19 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useMemo } from "react"
 import { Link } from "react-router-dom"
-import { Bell, Plus } from "lucide-react"
+import { Bell, Plus, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import supabase from "@/lib/supabase"
 import { useNewsFeed, type PostCategory } from "@/hooks/useNewsFeed"
+import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile"
 import { NewsCategoryFilters } from "@/components/news/NewsCategoryFilters"
 import { NewsCard } from "@/components/news/NewsCard"
+import { PublisherRolesDialog } from "@/components/gestao/PublisherRolesDialog"
 
 export function NewsTimeline() {
   const { feedItems, loading } = useNewsFeed()
   const [selectedCategory, setSelectedCategory] = useState<PostCategory | "todos">("todos")
-  const [canPost, setCanPost] = useState(false)
-
-  useEffect(() => {
-    async function checkPermissions() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("can_post, is_dev, is_presbyter, is_deacon")
-          .eq("user_id", session.user.id)
-          .single()
-
-        if (profile) {
-          setCanPost(
-            Boolean(
-              profile.can_post ||
-              profile.is_dev ||
-              profile.is_presbyter ||
-              profile.is_deacon
-            )
-          )
-        }
-      }
-    }
-
-    checkPermissions()
-  }, [])
+  const [publishersDialogOpen, setPublishersDialogOpen] = useState(false)
+  const { canPost, canAssignResourcePermissions } = useCurrentUserProfile()
 
   const filteredItems = useMemo(() => {
     if (selectedCategory === "todos") return feedItems
@@ -61,17 +34,33 @@ export function NewsTimeline() {
           </p>
         </div>
 
-        {canPost && (
-          <Button
-            asChild
-            size="sm"
-            className="min-h-[44px] shrink-0 gap-1.5 rounded-full font-semibold px-4"
-          >
-            <Link to="/noticias/nova">
-              <Plus className="h-4 w-4" />
-              <span>Novo Comunicado</span>
-            </Link>
-          </Button>
+        {(canPost || canAssignResourcePermissions) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {canAssignResourcePermissions && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPublishersDialogOpen(true)}
+                className="min-h-[44px] shrink-0 gap-1.5 rounded-full font-semibold px-4"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                <span>Publicadores</span>
+              </Button>
+            )}
+            {canPost && (
+              <Button
+                asChild
+                size="sm"
+                className="min-h-[44px] shrink-0 gap-1.5 rounded-full font-semibold px-4"
+              >
+                <Link to="/noticias/nova">
+                  <Plus className="h-4 w-4" />
+                  <span>Novo Comunicado</span>
+                </Link>
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -116,6 +105,10 @@ export function NewsTimeline() {
           ))}
         </div>
       )}
+      <PublisherRolesDialog
+        open={publishersDialogOpen}
+        onOpenChange={setPublishersDialogOpen}
+      />
     </div>
   )
 }

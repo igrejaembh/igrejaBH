@@ -7,16 +7,22 @@ import { DiscipleshipSideCard } from "@/components/home/DiscipleshipSideCard"
 import { StudyProgressCard, type ActiveStudyInfo } from "@/components/home/StudyProgressCard"
 import { CommunityCalendarCard } from "@/components/home/CommunityCalendarCard"
 import { NewsTimeline } from "@/components/home/NewsTimeline"
+import { ACCOUNT_TYPE_BADGE_CONFIG } from "@/constants/colors"
+import { normalizeAccountType } from "@/lib/permissions"
 import type { Database } from "@/lib/database.types"
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"]
+type ProfileSummary = {
+  id: string
+  full_name: string
+  avatar_url: string | null
+  phone: string | null
+}
 type HomeGroup = Database["public"]["Tables"]["home_groups"]["Row"] & {
   sectors?: Database["public"]["Tables"]["sectors"]["Row"] | null
-  leader_1?: Database["public"]["Tables"]["profiles"]["Row"] | null
-  leader_2?: Database["public"]["Tables"]["profiles"]["Row"] | null
+  leader_1?: ProfileSummary | null
+  leader_2?: ProfileSummary | null
 }
-
-type ProfileSummary = Pick<Profile, "id" | "full_name" | "avatar_url" | "phone">
 
 // Versículos focados no Propósito Eterno e edificação mútua
 const dailyVerses = [
@@ -96,38 +102,56 @@ export default function Home() {
 
         if (isMounted) setProfile(userProfile)
 
-        // 2. Carrega dados do Grupo Caseiro e dos seus irmãos
+        // 2. Carrega dados do Grupo Caseiro e dos seus irmãos (via diretório não-sensível)
         if (userProfile.home_group_id) {
           const { data: hgData } = await supabase
             .from("home_groups")
             .select(`
               *,
-              sectors (*),
-              leader_1:profiles!home_groups_leader_1_id_fkey (*),
-              leader_2:profiles!home_groups_leader_2_id_fkey (*)
+              sectors (*)
             `)
             .eq("id", userProfile.home_group_id)
             .maybeSingle()
 
-          if (isMounted && hgData) {
-            setHomeGroup(hgData as unknown as HomeGroup)
-          }
-
           const { data: membersData } = await supabase
-            .from("profiles")
+            .from("profile_directory")
             .select("id, full_name, avatar_url, phone")
             .eq("home_group_id", userProfile.home_group_id)
+            .eq("account_type", "disciple")
             .order("full_name")
 
-          if (isMounted && membersData) {
-            setGroupMembers(membersData)
+          const dirMembers = membersData || []
+          if (isMounted) {
+            setGroupMembers(dirMembers)
+          }
+
+          if (hgData) {
+            const leaderIds = [hgData.leader_1_id, hgData.leader_2_id].filter(
+              (id): id is string => Boolean(id)
+            )
+            const leaderMap = new Map<string, ProfileSummary>()
+            if (leaderIds.length > 0) {
+              const { data: leaderRows } = await supabase
+                .from("profile_directory")
+                .select("id, full_name, avatar_url, phone")
+                .in("id", leaderIds)
+              leaderRows?.forEach((l) => leaderMap.set(l.id, l))
+            }
+
+            if (isMounted) {
+              setHomeGroup({
+                ...hgData,
+                leader_1: hgData.leader_1_id ? leaderMap.get(hgData.leader_1_id) ?? null : null,
+                leader_2: hgData.leader_2_id ? leaderMap.get(hgData.leader_2_id) ?? null : null,
+              } as unknown as HomeGroup)
+            }
           }
         }
 
         // 3. Carrega Juntas e Ligamentos (Discipulador, Discípulos e Fellows)
         if (userProfile.discipler_id) {
           const { data: disciplerData } = await supabase
-            .from("profiles")
+            .from("profile_directory")
             .select("id, full_name, avatar_url, phone")
             .eq("id", userProfile.discipler_id)
             .maybeSingle()
@@ -148,9 +172,10 @@ export default function Home() {
 
         // Discípulos que eu acompanho
         const { data: disciplesData } = await supabase
-          .from("profiles")
+          .from("profile_directory")
           .select("id, full_name, avatar_url, phone")
           .eq("discipler_id", userProfile.id)
+          .eq("account_type", "disciple")
 
         if (isMounted && disciplesData) {
           setDisciples(disciplesData)
@@ -160,21 +185,31 @@ export default function Home() {
         const [fellowsARes, fellowsBRes] = await Promise.all([
           supabase
             .from("fellowships")
-            .select("member_b:profiles!fellowships_member_b_id_fkey(id, full_name, avatar_url, phone)")
+            .select("member_b_id")
             .eq("member_a_id", userProfile.id),
           supabase
             .from("fellowships")
-            .select("member_a:profiles!fellowships_member_a_id_fkey(id, full_name, avatar_url, phone)")
+            .select("member_a_id")
             .eq("member_b_id", userProfile.id),
         ])
 
+        const fellowIds = Array.from(
+          new Set([
+            ...(fellowsARes.data?.map((f) => f.member_b_id) || []),
+            ...(fellowsBRes.data?.map((f) => f.member_a_id) || []),
+          ])
+        )
+
         const combinedFellows: ProfileSummary[] = []
-        fellowsARes.data?.forEach((f) => {
-          if (f.member_b) combinedFellows.push(f.member_b as ProfileSummary)
-        })
-        fellowsBRes.data?.forEach((f) => {
-          if (f.member_a) combinedFellows.push(f.member_a as ProfileSummary)
-        })
+        if (fellowIds.length > 0) {
+          const { data: fellowProfiles } = await supabase
+            .from("profile_directory")
+            .select("id, full_name, avatar_url, phone")
+            .in("id", fellowIds)
+          if (fellowProfiles) {
+            combinedFellows.push(...fellowProfiles)
+          }
+        }
 
         if (isMounted) {
           setFellows(combinedFellows)
@@ -256,7 +291,13 @@ export default function Home() {
   }, [])
 
   const firstName = profile?.full_name ? profile.full_name.split(" ")[0] : ""
-  const isChurchLinked = Boolean(profile?.is_church_linked)
+  const accountType = normalizeAccountType(
+    profile?.account_type,
+    profile?.is_church_linked
+  )
+  const isChurchLinked = accountType === "disciple"
+  const isStudyOnly = accountType === "study"
+  const accountBadge = ACCOUNT_TYPE_BADGE_CONFIG[accountType]
 
   return (
     <div className="mx-auto max-w-6xl animate-in space-y-8 pb-12 duration-500 fade-in slide-in-from-bottom-4">
@@ -275,9 +316,9 @@ export default function Home() {
           {!loading && !isChurchLinked && (
             <Badge
               variant="outline"
-              className="self-start sm:self-auto border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs font-semibold px-2.5 py-1"
+              className={`self-start sm:self-auto px-2.5 py-1 text-xs font-semibold ${accountBadge.className}`}
             >
-              Conta de Estudos
+              {accountBadge.label}
             </Badge>
           )}
         </div>
@@ -334,17 +375,19 @@ export default function Home() {
           </aside>
         </div>
       ) : (
-        /* Para usuários de estudo, componentes de juntas e ligamentos não se aplicam e são omitidos */
+        /* Para usuários não vinculados, oculta vínculos do Corpo; Estudo também oculta calendário de eventos até participar */
         <div className="flex flex-col gap-6">
           <StudyProgressCard
             studyInfo={studyInfo}
             loading={loading}
           />
 
-          <CommunityCalendarCard
-            loading={loading}
-            isChurchLinked={false}
-          />
+          {!isStudyOnly && (
+            <CommunityCalendarCard
+              loading={loading}
+              isChurchLinked={false}
+            />
+          )}
         </div>
       )}
 
